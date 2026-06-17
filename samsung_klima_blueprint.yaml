@@ -1,0 +1,294 @@
+blueprint:
+  name: Samsung WindFree – Raumtemperatur halten (20–24 °C, 8–20 Uhr)
+  description: >-
+    Hält die Raumtemperatur tagsüber (08:00–20:00) zwischen 20 und 24 °C,
+    Zieltemperatur 22 °C. Kühlen: WindFree + Lüfter low (ab >26 °C Lüfter auto).
+    Heizen: Lüfter low, wenn unter 20 °C. Schaltet ab, wenn 21–23 °C 15 Min
+    stabil auf Lüfter low gehalten werden, sowie um 20:00 Uhr.
+    Generischer Klon von Charlys Steuerung – pro Raum nur die climate-Entität
+    auswählen (Charly, Henry, Schlafzimmer, Büro …).
+  domain: automation
+  input:
+    klima_entity:
+      name: Klimagerät
+      description: Die climate-Entität des Samsung-WindFree-Geräts.
+      selector:
+        entity:
+          filter:
+            - domain: climate
+
+variables:
+  klima: !input klima_entity
+
+triggers:
+  - trigger: numeric_state
+    entity_id: !input klima_entity
+    attribute: current_temperature
+    above: 24
+    for:
+      minutes: 5
+    id: t_warm
+  - trigger: numeric_state
+    entity_id: !input klima_entity
+    attribute: current_temperature
+    above: 26
+    for:
+      minutes: 2
+    id: t_hot
+  - trigger: numeric_state
+    entity_id: !input klima_entity
+    attribute: current_temperature
+    below: 25.5
+    id: t_cooler
+  - trigger: numeric_state
+    entity_id: !input klima_entity
+    attribute: current_temperature
+    below: 20
+    for:
+      minutes: 5
+    id: t_cold
+  - trigger: numeric_state
+    entity_id: !input klima_entity
+    attribute: current_temperature
+    above: 21
+    below: 23
+    for:
+      minutes: 15
+    id: t_stable
+  - trigger: time_pattern
+    minutes: /10
+    id: t_check
+  - trigger: time
+    at: "20:00:00"
+    id: t_offtime
+
+conditions: []
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: t_offtime
+        sequence:
+          - variables:
+              vorher: >-
+                {% set m = states(klima) %}{% set f =
+                state_attr(klima,'fan_mode') %}{% if m == 'off' %}Aus{% elif m ==
+                'cool' %}Kühlen ({{ 'Auto' if f == 'auto' else 'WindFree low'
+                }}){% elif m == 'heat' %}Heizen{% else %}{{ m }}{% endif %}
+          - action: climate.set_hvac_mode
+            target:
+              entity_id: !input klima_entity
+            data:
+              hvac_mode: "off"
+          - action: persistent_notification.create
+            data:
+              notification_id: "klima_{{ klima | replace('.','_') }}_{{ now().timestamp() | int }}"
+              title: "Klima {{ state_attr(klima,'friendly_name') or klima }}"
+              message: >-
+                {{ now().strftime('%d.%m. %H:%M') }} · Umstellung von "{{ vorher
+                }}" auf "Aus (Zeitfenster 20:00)" — aktuell {{
+                (state_attr(klima,'current_temperature') | round(1) |
+                string).replace('.', ',') }} °C
+      - conditions:
+          - condition: trigger
+            id: t_stable
+          - condition: state
+            entity_id: !input klima_entity
+            attribute: fan_mode
+            state: low
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input klima_entity
+                state: "off"
+        sequence:
+          - variables:
+              vorher: >-
+                {% set m = states(klima) %}{% set f =
+                state_attr(klima,'fan_mode') %}{% if m == 'off' %}Aus{% elif m ==
+                'cool' %}Kühlen ({{ 'Auto' if f == 'auto' else 'WindFree low'
+                }}){% elif m == 'heat' %}Heizen{% else %}{{ m }}{% endif %}
+          - action: climate.set_hvac_mode
+            target:
+              entity_id: !input klima_entity
+            data:
+              hvac_mode: "off"
+          - action: persistent_notification.create
+            data:
+              notification_id: "klima_{{ klima | replace('.','_') }}_{{ now().timestamp() | int }}"
+              title: "Klima {{ state_attr(klima,'friendly_name') or klima }}"
+              message: >-
+                {{ now().strftime('%d.%m. %H:%M') }} · Umstellung von "{{ vorher
+                }}" auf "Aus (Ziel 21–23 °C stabil)" — aktuell {{
+                (state_attr(klima,'current_temperature') | round(1) |
+                string).replace('.', ',') }} °C
+      - conditions:
+          - condition: time
+            after: "08:00:00"
+            before: "20:00:00"
+          - condition: numeric_state
+            entity_id: !input klima_entity
+            attribute: current_temperature
+            below: 20
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input klima_entity
+                state: heat
+        sequence:
+          - variables:
+              vorher: >-
+                {% set m = states(klima) %}{% set f =
+                state_attr(klima,'fan_mode') %}{% if m == 'off' %}Aus{% elif m ==
+                'cool' %}Kühlen ({{ 'Auto' if f == 'auto' else 'WindFree low'
+                }}){% elif m == 'heat' %}Heizen{% else %}{{ m }}{% endif %}
+          - action: climate.set_hvac_mode
+            target:
+              entity_id: !input klima_entity
+            data:
+              hvac_mode: heat
+          - action: climate.set_fan_mode
+            target:
+              entity_id: !input klima_entity
+            data:
+              fan_mode: low
+          - action: climate.set_temperature
+            target:
+              entity_id: !input klima_entity
+            data:
+              temperature: 22
+          - action: persistent_notification.create
+            data:
+              notification_id: "klima_{{ klima | replace('.','_') }}_{{ now().timestamp() | int }}"
+              title: "Klima {{ state_attr(klima,'friendly_name') or klima }}"
+              message: >-
+                {{ now().strftime('%d.%m. %H:%M') }} · Umstellung von "{{ vorher
+                }}" auf "Heizen" — aktuell {{
+                (state_attr(klima,'current_temperature') | round(1) |
+                string).replace('.', ',') }} °C, Ziel 22 °C
+      - conditions:
+          - condition: time
+            after: "08:00:00"
+            before: "20:00:00"
+          - condition: numeric_state
+            entity_id: !input klima_entity
+            attribute: current_temperature
+            above: 24
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input klima_entity
+                state: cool
+        sequence:
+          - variables:
+              vorher: >-
+                {% set m = states(klima) %}{% set f =
+                state_attr(klima,'fan_mode') %}{% if m == 'off' %}Aus{% elif m ==
+                'cool' %}Kühlen ({{ 'Auto' if f == 'auto' else 'WindFree low'
+                }}){% elif m == 'heat' %}Heizen{% else %}{{ m }}{% endif %}
+          - action: climate.set_hvac_mode
+            target:
+              entity_id: !input klima_entity
+            data:
+              hvac_mode: cool
+          - action: climate.set_preset_mode
+            target:
+              entity_id: !input klima_entity
+            data:
+              preset_mode: wind_free
+          - action: climate.set_temperature
+            target:
+              entity_id: !input klima_entity
+            data:
+              temperature: 22
+          - action: climate.set_fan_mode
+            target:
+              entity_id: !input klima_entity
+            data:
+              fan_mode: >-
+                {{ 'auto' if state_attr(klima,'current_temperature') | float(0) >
+                26 else 'low' }}
+          - action: persistent_notification.create
+            data:
+              notification_id: "klima_{{ klima | replace('.','_') }}_{{ now().timestamp() | int }}"
+              title: "Klima {{ state_attr(klima,'friendly_name') or klima }}"
+              message: >-
+                {{ now().strftime('%d.%m. %H:%M') }} · Umstellung von "{{ vorher
+                }}" auf "Kühlen – WindFree ({{ 'Auto' if
+                (state_attr(klima,'current_temperature') | float(0) > 26) else
+                'low' }})" — aktuell {{ (state_attr(klima,'current_temperature')
+                | round(1) | string).replace('.', ',') }} °C, Ziel 22 °C
+      - conditions:
+          - condition: time
+            after: "08:00:00"
+            before: "20:00:00"
+          - condition: state
+            entity_id: !input klima_entity
+            state: cool
+          - condition: numeric_state
+            entity_id: !input klima_entity
+            attribute: current_temperature
+            above: 26
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input klima_entity
+                attribute: fan_mode
+                state: auto
+        sequence:
+          - action: climate.set_fan_mode
+            target:
+              entity_id: !input klima_entity
+            data:
+              fan_mode: auto
+          - action: climate.set_preset_mode
+            target:
+              entity_id: !input klima_entity
+            data:
+              preset_mode: wind_free
+      - conditions:
+          - condition: time
+            after: "08:00:00"
+            before: "20:00:00"
+          - condition: state
+            entity_id: !input klima_entity
+            state: cool
+          - condition: numeric_state
+            entity_id: !input klima_entity
+            attribute: current_temperature
+            below: 25.5
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input klima_entity
+                attribute: fan_mode
+                state: low
+        sequence:
+          - action: climate.set_fan_mode
+            target:
+              entity_id: !input klima_entity
+            data:
+              fan_mode: low
+      - conditions:
+          - condition: time
+            after: "08:00:00"
+            before: "20:00:00"
+          - condition: state
+            entity_id: !input klima_entity
+            state: cool
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input klima_entity
+                attribute: preset_mode
+                state: wind_free
+        sequence:
+          - action: climate.set_preset_mode
+            target:
+              entity_id: !input klima_entity
+            data:
+              preset_mode: wind_free
+
+mode: single
+max_exceeded: silent
