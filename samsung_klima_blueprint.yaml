@@ -5,6 +5,9 @@ blueprint:
     Zieltemperatur 22 °C. Kühlen: WindFree + Lüfter low (ab >26 °C Lüfter auto).
     Heizen: Lüfter low, wenn unter 20 °C. Schaltet ab, wenn 21–23 °C 15 Min
     stabil auf Lüfter low gehalten werden, sowie um 20:00 Uhr.
+    Prüft alle 5 Minuten (zusätzlich ereignisgesteuert) und schreibt bei JEDER
+    Prüfung im aktiven Fenster eine Mitteilung mit aktuellem Stand UND
+    Begründung, warum gerade etwas gemacht wird – oder bewusst nicht.
     Generischer Klon von Charlys Steuerung – pro Raum nur die climate-Entität
     auswählen (Charly, Henry, Schlafzimmer, Büro …).
   domain: automation
@@ -19,6 +22,44 @@ blueprint:
 
 variables:
   klima: !input klima_entity
+  trig: "{{ trigger.id | default('manual') }}"
+  temp: "{{ state_attr(klima,'current_temperature') | float(none) }}"
+  mode: "{{ states(klima) }}"
+  fan: "{{ state_attr(klima,'fan_mode') }}"
+  preset: "{{ state_attr(klima,'preset_mode') }}"
+  in_window: "{{ 8 <= now().hour < 20 }}"
+  temp_str: >-
+    {{ (temp | round(1) | string).replace('.', ',') if temp is not none else '—' }}
+  ziel: >-
+    {{ ('off_zeit' if trig == 't_offtime'
+        else ('aus_zeitfenster' if not in_window
+        else ('kein_wert' if temp is none
+        else ('off_stabil' if (trig == 't_stable' and fan == 'low' and mode != 'off')
+        else ('heizen' if (temp < 20 and mode != 'heat')
+        else ('kuehlen' if (temp > 24 and mode != 'cool')
+        else ('kuehl_fan_auto' if (mode == 'cool' and temp > 26 and fan != 'auto')
+        else ('kuehl_fan_low' if (mode == 'cool' and temp < 25.5 and fan != 'low')
+        else ('kuehl_windfree' if (mode == 'cool' and preset != 'wind_free')
+        else 'halten'))))))))) }}
+  did_act: >-
+    {{ ziel in ['off_zeit','off_stabil','heizen','kuehlen','kuehl_fan_auto','kuehl_fan_low','kuehl_windfree'] }}
+  notify: "{{ in_window or ziel == 'off_zeit' }}"
+  status: >-
+    Modus {{ {'off':'Aus','cool':'Kühlen','heat':'Heizen'}.get(mode, mode)
+    }}{% if mode == 'cool' %} (Lüfter {{ fan }}, Preset {{ preset }}){% elif mode == 'heat' %} (Lüfter {{ fan }}){% endif %} · aktuell {{ temp_str }} °C
+  grund: >-
+    {{ {
+      'off_zeit': 'Zeitfenster-Ende 20:00 Uhr → Anlage aus',
+      'off_stabil': '21–23 °C seit 15 Min stabil (Lüfter low) → Anlage aus',
+      'heizen': 'Raum < 20 °C → Heizen, Lüfter low, Ziel 22 °C',
+      'kuehlen': 'Raum > 24 °C → Kühlen WindFree, Ziel 22 °C, Lüfter ' ~ ('Auto' if (temp is not none and temp > 26) else 'low'),
+      'kuehl_fan_auto': 'Kühlen aktiv, Raum > 26 °C → Lüfter auf Auto',
+      'kuehl_fan_low': 'Kühlen aktiv, Raum < 25,5 °C → Lüfter zurück auf low',
+      'kuehl_windfree': 'Kühlen aktiv → WindFree wiederhergestellt',
+      'halten': 'im Zielbereich (20–24 °C) bzw. kein Moduswechsel nötig → keine Änderung',
+      'aus_zeitfenster': 'außerhalb Zeitfenster (08–20 Uhr) → keine Steuerung',
+      'kein_wert': 'keine aktuelle Temperatur verfügbar → keine Steuerung'
+    }.get(ziel, ziel) }}
 
 triggers:
   - trigger: numeric_state
@@ -56,7 +97,7 @@ triggers:
       minutes: 15
     id: t_stable
   - trigger: time_pattern
-    minutes: /10
+    minutes: /5
     id: t_check
   - trigger: time
     at: "20:00:00"
@@ -67,82 +108,18 @@ conditions: []
 actions:
   - choose:
       - conditions:
-          - condition: trigger
-            id: t_offtime
+          - condition: template
+            value_template: "{{ ziel in ['off_zeit','off_stabil'] }}"
         sequence:
-          - variables:
-              vorher: >-
-                {% set m = states(klima) %}{% set f =
-                state_attr(klima,'fan_mode') %}{% if m == 'off' %}Aus{% elif m ==
-                'cool' %}Kühlen ({{ 'Auto' if f == 'auto' else 'WindFree low'
-                }}){% elif m == 'heat' %}Heizen{% else %}{{ m }}{% endif %}
           - action: climate.set_hvac_mode
             target:
               entity_id: !input klima_entity
             data:
               hvac_mode: "off"
-          - action: persistent_notification.create
-            data:
-              notification_id: "klima_{{ klima | replace('.','_') }}_{{ now().timestamp() | int }}"
-              title: "Klima {{ state_attr(klima,'friendly_name') or klima }}"
-              message: >-
-                {{ now().strftime('%d.%m. %H:%M') }} · Umstellung von "{{ vorher
-                }}" auf "Aus (Zeitfenster 20:00)" — aktuell {{
-                (state_attr(klima,'current_temperature') | round(1) |
-                string).replace('.', ',') }} °C
       - conditions:
-          - condition: trigger
-            id: t_stable
-          - condition: state
-            entity_id: !input klima_entity
-            attribute: fan_mode
-            state: low
-          - condition: not
-            conditions:
-              - condition: state
-                entity_id: !input klima_entity
-                state: "off"
+          - condition: template
+            value_template: "{{ ziel == 'heizen' }}"
         sequence:
-          - variables:
-              vorher: >-
-                {% set m = states(klima) %}{% set f =
-                state_attr(klima,'fan_mode') %}{% if m == 'off' %}Aus{% elif m ==
-                'cool' %}Kühlen ({{ 'Auto' if f == 'auto' else 'WindFree low'
-                }}){% elif m == 'heat' %}Heizen{% else %}{{ m }}{% endif %}
-          - action: climate.set_hvac_mode
-            target:
-              entity_id: !input klima_entity
-            data:
-              hvac_mode: "off"
-          - action: persistent_notification.create
-            data:
-              notification_id: "klima_{{ klima | replace('.','_') }}_{{ now().timestamp() | int }}"
-              title: "Klima {{ state_attr(klima,'friendly_name') or klima }}"
-              message: >-
-                {{ now().strftime('%d.%m. %H:%M') }} · Umstellung von "{{ vorher
-                }}" auf "Aus (Ziel 21–23 °C stabil)" — aktuell {{
-                (state_attr(klima,'current_temperature') | round(1) |
-                string).replace('.', ',') }} °C
-      - conditions:
-          - condition: time
-            after: "08:00:00"
-            before: "20:00:00"
-          - condition: numeric_state
-            entity_id: !input klima_entity
-            attribute: current_temperature
-            below: 20
-          - condition: not
-            conditions:
-              - condition: state
-                entity_id: !input klima_entity
-                state: heat
-        sequence:
-          - variables:
-              vorher: >-
-                {% set m = states(klima) %}{% set f =
-                state_attr(klima,'fan_mode') %}{% if m == 'off' %}Aus{% elif m ==
-                'cool' %}Kühlen ({{ 'Auto' if f == 'auto' else 'WindFree low'
-                }}){% elif m == 'heat' %}Heizen{% else %}{{ m }}{% endif %}
           - action: climate.set_hvac_mode
             target:
               entity_id: !input klima_entity
@@ -158,35 +135,10 @@ actions:
               entity_id: !input klima_entity
             data:
               temperature: 22
-          - action: persistent_notification.create
-            data:
-              notification_id: "klima_{{ klima | replace('.','_') }}_{{ now().timestamp() | int }}"
-              title: "Klima {{ state_attr(klima,'friendly_name') or klima }}"
-              message: >-
-                {{ now().strftime('%d.%m. %H:%M') }} · Umstellung von "{{ vorher
-                }}" auf "Heizen" — aktuell {{
-                (state_attr(klima,'current_temperature') | round(1) |
-                string).replace('.', ',') }} °C, Ziel 22 °C
       - conditions:
-          - condition: time
-            after: "08:00:00"
-            before: "20:00:00"
-          - condition: numeric_state
-            entity_id: !input klima_entity
-            attribute: current_temperature
-            above: 24
-          - condition: not
-            conditions:
-              - condition: state
-                entity_id: !input klima_entity
-                state: cool
+          - condition: template
+            value_template: "{{ ziel == 'kuehlen' }}"
         sequence:
-          - variables:
-              vorher: >-
-                {% set m = states(klima) %}{% set f =
-                state_attr(klima,'fan_mode') %}{% if m == 'off' %}Aus{% elif m ==
-                'cool' %}Kühlen ({{ 'Auto' if f == 'auto' else 'WindFree low'
-                }}){% elif m == 'heat' %}Heizen{% else %}{{ m }}{% endif %}
           - action: climate.set_hvac_mode
             target:
               entity_id: !input klima_entity
@@ -207,35 +159,10 @@ actions:
               entity_id: !input klima_entity
             data:
               fan_mode: >-
-                {{ 'auto' if state_attr(klima,'current_temperature') | float(0) >
-                26 else 'low' }}
-          - action: persistent_notification.create
-            data:
-              notification_id: "klima_{{ klima | replace('.','_') }}_{{ now().timestamp() | int }}"
-              title: "Klima {{ state_attr(klima,'friendly_name') or klima }}"
-              message: >-
-                {{ now().strftime('%d.%m. %H:%M') }} · Umstellung von "{{ vorher
-                }}" auf "Kühlen – WindFree ({{ 'Auto' if
-                (state_attr(klima,'current_temperature') | float(0) > 26) else
-                'low' }})" — aktuell {{ (state_attr(klima,'current_temperature')
-                | round(1) | string).replace('.', ',') }} °C, Ziel 22 °C
+                {{ 'auto' if (temp is not none and temp > 26) else 'low' }}
       - conditions:
-          - condition: time
-            after: "08:00:00"
-            before: "20:00:00"
-          - condition: state
-            entity_id: !input klima_entity
-            state: cool
-          - condition: numeric_state
-            entity_id: !input klima_entity
-            attribute: current_temperature
-            above: 26
-          - condition: not
-            conditions:
-              - condition: state
-                entity_id: !input klima_entity
-                attribute: fan_mode
-                state: auto
+          - condition: template
+            value_template: "{{ ziel == 'kuehl_fan_auto' }}"
         sequence:
           - action: climate.set_fan_mode
             target:
@@ -248,22 +175,8 @@ actions:
             data:
               preset_mode: wind_free
       - conditions:
-          - condition: time
-            after: "08:00:00"
-            before: "20:00:00"
-          - condition: state
-            entity_id: !input klima_entity
-            state: cool
-          - condition: numeric_state
-            entity_id: !input klima_entity
-            attribute: current_temperature
-            below: 25.5
-          - condition: not
-            conditions:
-              - condition: state
-                entity_id: !input klima_entity
-                attribute: fan_mode
-                state: low
+          - condition: template
+            value_template: "{{ ziel == 'kuehl_fan_low' }}"
         sequence:
           - action: climate.set_fan_mode
             target:
@@ -271,24 +184,26 @@ actions:
             data:
               fan_mode: low
       - conditions:
-          - condition: time
-            after: "08:00:00"
-            before: "20:00:00"
-          - condition: state
-            entity_id: !input klima_entity
-            state: cool
-          - condition: not
-            conditions:
-              - condition: state
-                entity_id: !input klima_entity
-                attribute: preset_mode
-                state: wind_free
+          - condition: template
+            value_template: "{{ ziel == 'kuehl_windfree' }}"
         sequence:
           - action: climate.set_preset_mode
             target:
               entity_id: !input klima_entity
             data:
               preset_mode: wind_free
+    default: []
+  - if:
+      - condition: template
+        value_template: "{{ notify }}"
+    then:
+      - action: persistent_notification.create
+        data:
+          notification_id: "klima_{{ klima | replace('.','_') }}_{{ now().timestamp() | int }}"
+          title: "Klima {{ state_attr(klima,'friendly_name') or klima }}"
+          message: >-
+            {{ now().strftime('%d.%m. %H:%M') }} · {{ 'AKTION' if did_act else
+            'keine Aktion' }} — Stand: {{ status }} — Grund: {{ grund }}
 
 mode: single
 max_exceeded: silent
