@@ -113,7 +113,13 @@ triggers:
     minutes: "2"
     id: t_purge
   - trigger: time_pattern
+    minutes: "17"
+    id: t_purge
+  - trigger: time_pattern
     minutes: "32"
+    id: t_purge
+  - trigger: time_pattern
+    minutes: "47"
     id: t_purge
   - trigger: time
     at: "20:00:00"
@@ -138,7 +144,7 @@ actions:
             data:
               preset_mode: boost
           - delay:
-              seconds: 20
+              seconds: 40
           - action: climate.set_hvac_mode
             target:
               entity_id: !input klima_entity
