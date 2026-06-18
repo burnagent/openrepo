@@ -25,12 +25,12 @@ blueprint:
     aussen_entity:
       name: Außentemperatur-Sensor (optional)
       description: >-
-        Sensor der Außentemperatur. Nur nötig für die Stoßlüftung: Wenn die
+        Sensor der Außentemperatur. Steuert die Stoßlüftung: Wenn die
         Außentemperatur über 24 °C liegt, wird im Zeitfenster (08–20 Uhr) alle
         30 Minuten 20 Sekunden lang fan_only + Boost geschaltet und danach
-        wieder ausgeschaltet. Bleibt das Feld leer, ist die Stoßlüftung
-        deaktiviert.
-      default: ""
+        wieder ausgeschaltet (nur bei ausgeschaltetem Gerät). Vorbelegt mit dem
+        Helper „Aussentemperatur Met.no". Feld leeren = Stoßlüftung deaktiviert.
+      default: sensor.aussentemperatur_met_no
       selector:
         entity:
           filter:
@@ -110,7 +110,10 @@ triggers:
     minutes: /5
     id: t_check
   - trigger: time_pattern
-    minutes: "2,32"
+    minutes: "2"
+    id: t_purge
+  - trigger: time_pattern
+    minutes: "32"
     id: t_purge
   - trigger: time
     at: "20:00:00"
