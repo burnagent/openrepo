@@ -1,0 +1,321 @@
+blueprint:
+  name: Klima – 2-Sensor-Mittelwert-Regelung (Heizen/Kühlen + Lamellen)
+  description: >-
+    Generischer Klon der Esszimmer-Steuerung (Bosch). Regelt einen Raum auf eine
+    Zieltemperatur anhand des Mittelwerts zweier Temperatursensoren (optional
+    eines vorhandenen Mittelwert-Sensors). Steuert Heizen/Kühlen inkl. Lüfter
+    und vertikaler/horizontaler Lamellen-Position. Stellt nur bei echtem
+    Zustandswechsel um und meldet diesen per HA-Mitteilung mit allen Werten.
+    Mindestlaufzeit + Hysterese als Schutz gegen Pendeln.
+
+    Pro Raum nur die Entitäten auswählen – Schwellen und Geräte-Rohwerte haben
+    Defaults (passend zum Bosch im Esszimmer) und müssen nur bei abweichenden
+    Geräten angepasst werden.
+  domain: automation
+  input:
+    klima_entity:
+      name: Klimagerät
+      description: Die climate-Entität.
+      selector:
+        entity:
+          filter:
+            - domain: climate
+    sensor_1:
+      name: Temperatursensor 1
+      description: Erster Raumsensor (z. B. Esstisch).
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: temperature
+    sensor_2:
+      name: Temperatursensor 2
+      description: Zweiter Raumsensor (z. B. Couch).
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: temperature
+    sel_vertikal:
+      name: Lamellen vertikal (select)
+      description: select-Entität für die vertikale Lamellen-Position.
+      selector:
+        entity:
+          filter:
+            - domain: select
+    sel_horizontal:
+      name: Lamellen horizontal (select)
+      description: select-Entität für die horizontale Lamellen-Position.
+      selector:
+        entity:
+          filter:
+            - domain: select
+    sensor_mittelwert:
+      name: Mittelwert-Sensor (optional)
+      description: >-
+        Vorhandener Mittelwert-Sensor. Wenn gesetzt, hat er Vorrang; sonst wird
+        der Mittelwert aus Sensor 1 und Sensor 2 berechnet.
+      default:
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: temperature
+    ziel_temp:
+      name: Zieltemperatur (°C)
+      default: 23
+      selector:
+        number:
+          min: 16
+          max: 28
+          step: 0.5
+          unit_of_measurement: "°C"
+    kuehlen_ein:
+      name: Kühlen einschalten ab (°C)
+      default: 25
+      selector:
+        number:
+          min: 20
+          max: 32
+          step: 0.5
+          unit_of_measurement: "°C"
+    kuehlen_aus:
+      name: Kühlen beenden bei (°C, Hysterese)
+      default: 23
+      selector:
+        number:
+          min: 18
+          max: 28
+          step: 0.5
+          unit_of_measurement: "°C"
+    heizen_ein:
+      name: Heizen einschalten unter (°C)
+      default: 21.5
+      selector:
+        number:
+          min: 10
+          max: 24
+          step: 0.5
+          unit_of_measurement: "°C"
+    heizen_aus:
+      name: Heizen beenden bei (°C, Hysterese)
+      default: 23
+      selector:
+        number:
+          min: 16
+          max: 26
+          step: 0.5
+          unit_of_measurement: "°C"
+    kuehlen_stark_ueber:
+      name: "Kühlen: starke Stufe über (°C)"
+      default: 28
+      selector:
+        number:
+          min: 22
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+    heizen_swing_unter:
+      name: "Heizen: Swing-Lamellen unter (°C)"
+      default: 21
+      selector:
+        number:
+          min: 10
+          max: 24
+          step: 0.5
+          unit_of_measurement: "°C"
+    min_laufzeit:
+      name: Mindestlaufzeit vor Moduswechsel (Min)
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 120
+          step: 5
+          unit_of_measurement: "min"
+    fan_stark:
+      name: "Lüftermodus: stark (Rohwert)"
+      default: low
+      selector:
+        text:
+    fan_leise:
+      name: "Lüftermodus: leise (Rohwert)"
+      default: diffuse
+      selector:
+        text:
+    pos_heizen:
+      name: "Lamelle vertikal: Heizen normal (Rohwert)"
+      default: angle5
+      selector:
+        text:
+    pos_kuehlen:
+      name: "Lamelle vertikal: Kühlen (Rohwert)"
+      default: angle1
+      selector:
+        text:
+    pos_swing:
+      name: "Lamelle vertikal: Swing (Rohwert)"
+      default: swing
+      selector:
+        text:
+    pos_horizontal:
+      name: "Lamelle horizontal (Rohwert)"
+      default: center
+      selector:
+        text:
+
+variables:
+  clima: !input klima_entity
+  s1: !input sensor_1
+  s2: !input sensor_2
+  sel_vertikal: !input sel_vertikal
+  sel_horizontal: !input sel_horizontal
+  avg_entity: !input sensor_mittelwert
+  ziel_temp: !input ziel_temp
+  kuehlen_ein: !input kuehlen_ein
+  kuehlen_aus: !input kuehlen_aus
+  heizen_ein: !input heizen_ein
+  heizen_aus: !input heizen_aus
+  kuehlen_stark_ueber: !input kuehlen_stark_ueber
+  heizen_swing_unter: !input heizen_swing_unter
+  min_laufzeit: !input min_laufzeit
+  fan_stark: !input fan_stark
+  fan_leise: !input fan_leise
+  pos_heizen: !input pos_heizen
+  pos_kuehlen: !input pos_kuehlen
+  pos_swing: !input pos_swing
+  pos_horizontal: !input pos_horizontal
+  ht1: "{{ states(s1) | float(none) }}"
+  ht2: "{{ states(s2) | float(none) }}"
+  avg_sensor: >-
+    {{ states(avg_entity) | float(none)
+       if (avg_entity not in [none, '', 'none']) else none }}
+  raum: |-
+    {{ avg_sensor if avg_sensor is not none
+       else ((([ht1, ht2] | reject('none') | list | sum)
+              / ([ht1, ht2] | reject('none') | list | length))
+             if ([ht1, ht2] | reject('none') | list | length) > 0 else none) }}
+  valid: "{{ raum is not none }}"
+  hvac: "{{ states(clima) }}"
+  is_heating: "{{ hvac == 'heat' }}"
+  is_cooling: "{{ hvac == 'cool' }}"
+  last_chg: >-
+    {{ states[clima].last_changed if states[clima] is not none else now() }}
+  run_min: "{{ (now() - last_chg).total_seconds() / 60 }}"
+  min_runtime_ok: "{{ run_min >= min_laufzeit }}"
+  locked: "{{ (is_heating or is_cooling) and not min_runtime_ok }}"
+  cool_needed: "{{ valid and raum >= kuehlen_ein }}"
+  cool_done: "{{ valid and raum <= kuehlen_aus }}"
+  heat_needed: "{{ valid and raum < heizen_ein }}"
+  heat_done: "{{ valid and raum >= heizen_aus }}"
+  want_cool: "{{ cool_needed or (is_cooling and not cool_done) }}"
+  want_heat: "{{ heat_needed or (is_heating and not heat_done) }}"
+  ziel: |-
+    {{
+      'skip' if not valid else
+      (('kuehlen_low' if raum > kuehlen_stark_ueber else 'kuehlen_diffuse')
+        if (want_cool and not (locked and is_heating)) else
+      (('heizen_swing' if raum < heizen_swing_unter else 'heizen_normal')
+        if (want_heat and not (locked and is_cooling)) else
+      ('aus' if (((is_heating or is_cooling) and min_runtime_ok) or hvac == 'off')
+        else 'halten')))
+    }}
+  ist: |-
+    {{
+      'aus' if hvac == 'off' else
+      (('heizen_swing' if states(sel_vertikal) == pos_swing else 'heizen_normal')
+        if hvac == 'heat' else
+      (('kuehlen_low' if state_attr(clima, 'fan_mode') == fan_stark else 'kuehlen_diffuse')
+        if hvac == 'cool' else hvac))
+    }}
+  act: "{{ ziel not in ['skip', 'halten'] and ziel != ist }}"
+  d_mode: |-
+    {{ 'cool' if ziel in ['kuehlen_low','kuehlen_diffuse']
+       else ('heat' if ziel in ['heizen_normal','heizen_swing'] else 'off') }}
+  d_fan: "{{ fan_stark if ziel == 'kuehlen_low' else fan_leise }}"
+  d_vert: |-
+    {{ pos_swing if ziel == 'heizen_swing'
+       else (pos_heizen if ziel == 'heizen_normal' else pos_kuehlen) }}
+  name1: "{{ state_attr(s1,'friendly_name') or 'Sensor 1' }}"
+  name2: "{{ state_attr(s2,'friendly_name') or 'Sensor 2' }}"
+  txt_ist: >-
+    {{ {'aus':'Aus','heizen_normal':'Heizen - normal','heizen_swing':'Heizen - Swing',
+        'kuehlen_low':'Kühlen - stark','kuehlen_diffuse':'Kühlen - leise'}.get(ist, ist) }}
+  txt_ziel: >-
+    {{ {'aus':'Aus','heizen_normal':'Heizen - normal','heizen_swing':'Heizen - Swing',
+        'kuehlen_low':'Kühlen - stark','kuehlen_diffuse':'Kühlen - leise'}.get(ziel, ziel) }}
+
+triggers:
+  - trigger: state
+    entity_id: !input sensor_1
+    id: sensor1_change
+  - trigger: state
+    entity_id: !input sensor_2
+    id: sensor2_change
+  - trigger: homeassistant
+    event: start
+    id: ha_start
+  - trigger: time_pattern
+    minutes: /5
+    id: periodisch
+
+conditions: []
+
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ not act }}"
+        sequence: []
+    default:
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ ziel == 'aus' }}"
+            sequence:
+              - action: climate.turn_off
+                target:
+                  entity_id: "{{ clima }}"
+        default:
+          - action: climate.set_hvac_mode
+            target:
+              entity_id: "{{ clima }}"
+            data:
+              hvac_mode: "{{ d_mode }}"
+          - action: climate.set_temperature
+            target:
+              entity_id: "{{ clima }}"
+            data:
+              temperature: "{{ ziel_temp }}"
+          - action: climate.set_fan_mode
+            continue_on_error: true
+            target:
+              entity_id: "{{ clima }}"
+            data:
+              fan_mode: "{{ d_fan }}"
+          - action: select.select_option
+            continue_on_error: true
+            target:
+              entity_id: "{{ sel_vertikal }}"
+            data:
+              option: "{{ d_vert }}"
+          - action: select.select_option
+            continue_on_error: true
+            target:
+              entity_id: "{{ sel_horizontal }}"
+            data:
+              option: "{{ pos_horizontal }}"
+      - action: persistent_notification.create
+        data:
+          notification_id: "klima_{{ clima | replace('.','_') }}_{{ now().timestamp() | int }}"
+          title: "Klima {{ state_attr(clima,'friendly_name') or clima }}"
+          message: >-
+            {{ now().strftime('%d.%m. %H:%M') }} · Umstellung von "{{ txt_ist }}"
+            auf "{{ txt_ziel }}" — Mittelwert {{ (raum | round(1) |
+            string).replace('.', ',') }} °C ({{ name1 }} {{ (ht1 | round(1) |
+            string).replace('.', ',') if ht1 is not none else '—' }} · {{ name2 }}
+            {{ (ht2 | round(1) | string).replace('.', ',') if ht2 is not none else
+            '—' }})
+
+mode: single
+max_exceeded: silent
