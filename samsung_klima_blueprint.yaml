@@ -8,6 +8,9 @@ blueprint:
     Prüft alle 5 Minuten (zusätzlich ereignisgesteuert) und schreibt bei JEDER
     Prüfung im aktiven Fenster eine Mitteilung mit aktuellem Stand UND
     Begründung, warum gerade etwas gemacht wird – oder bewusst nicht.
+    Zusätzliches Stoßlüften: Liegt die Außentemperatur über 24 °C, wird im
+    Zeitfenster (08–20 Uhr) alle 30 Minuten 20 s lang fan_only + Boost
+    geschaltet und danach wieder ausgeschaltet (optionaler Außensensor-Input).
     Generischer Klon von Charlys Steuerung – pro Raum nur die climate-Entität
     auswählen (Charly, Henry, Schlafzimmer, Büro …).
   domain: automation
@@ -19,28 +22,49 @@ blueprint:
         entity:
           filter:
             - domain: climate
+    aussen_entity:
+      name: Außentemperatur-Sensor (optional)
+      description: >-
+        Sensor der Außentemperatur. Nur nötig für die Stoßlüftung: Wenn die
+        Außentemperatur über 24 °C liegt, wird im Zeitfenster (08–20 Uhr) alle
+        30 Minuten 20 Sekunden lang fan_only + Boost geschaltet und danach
+        wieder ausgeschaltet. Bleibt das Feld leer, ist die Stoßlüftung
+        deaktiviert.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: temperature
 
 variables:
   klima: !input klima_entity
+  aussen_id: !input aussen_entity
   trig: "{{ trigger.id | default('manual') }}"
   temp: "{{ state_attr(klima,'current_temperature') | float(none) }}"
   mode: "{{ states(klima) }}"
   fan: "{{ state_attr(klima,'fan_mode') }}"
   preset: "{{ state_attr(klima,'preset_mode') }}"
+  aussen: >-
+    {{ states(aussen_id) | float(none) if aussen_id not in [none, ''] else none }}
   in_window: "{{ 8 <= now().hour < 20 }}"
   temp_str: >-
     {{ (temp | round(1) | string).replace('.', ',') if temp is not none else '—' }}
+  aussen_str: >-
+    {{ (aussen | round(1) | string).replace('.', ',') if aussen is not none else '—' }}
   ziel: >-
     {{ ('off_zeit' if trig == 't_offtime'
         else ('aus_zeitfenster' if not in_window
+        else ('durchlueften' if (trig == 't_purge' and aussen is not none and aussen > 24 and mode == 'off')
+        else ('purge_aus' if trig == 't_purge'
         else ('kein_wert' if temp is none
         else ('off_stabil' if (trig == 't_stable' and mode != 'off')
         else ('heizen' if (temp < 20 and mode != 'heat')
         else ('kuehlen' if (temp > 24 and mode != 'cool')
         else ('kuehl_windfree' if (mode == 'cool' and (preset != 'wind_free' or fan != 'auto'))
-        else 'halten'))))))) }}
+        else 'halten'))))))))) }}
   did_act: >-
-    {{ ziel in ['off_zeit','off_stabil','heizen','kuehlen','kuehl_windfree'] }}
+    {{ ziel in ['off_zeit','off_stabil','heizen','kuehlen','kuehl_windfree','durchlueften'] }}
   notify: "{{ did_act }}"
   status: >-
     Modus {{ {'off':'Aus','cool':'Kühlen','heat':'Heizen'}.get(mode, mode)
@@ -52,6 +76,8 @@ variables:
       'heizen': 'Raum < 20 °C → Heizen, Lüfter low, Ziel 22 °C',
       'kuehlen': 'Raum > 24 °C → Kühlen WindFree (Lüfter Auto), Ziel 22 °C',
       'kuehl_windfree': 'Kühlen aktiv → WindFree + Lüfter Auto wiederhergestellt',
+      'durchlueften': 'Gerät aus & außen ' ~ aussen_str ~ ' °C (> 24) → 20 s Stoßlüften (fan_only + Boost), dann aus',
+      'purge_aus': 'Stoßlüft-Intervall übersprungen (außen ' ~ aussen_str ~ ' °C ≤ 24, kein Sensor, oder Gerät kühlt/heizt → Kühlen/Heizen hat Vorrang)',
       'halten': 'im Zielbereich (20–24 °C) bzw. kein Moduswechsel nötig → keine Änderung',
       'aus_zeitfenster': 'außerhalb Zeitfenster (08–20 Uhr) → keine Steuerung',
       'kein_wert': 'keine aktuelle Temperatur verfügbar → keine Steuerung'
@@ -83,6 +109,9 @@ triggers:
   - trigger: time_pattern
     minutes: /5
     id: t_check
+  - trigger: time_pattern
+    minutes: "2,32"
+    id: t_purge
   - trigger: time
     at: "20:00:00"
     id: t_offtime
@@ -91,6 +120,27 @@ conditions: []
 
 actions:
   - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ ziel == 'durchlueften' }}"
+        sequence:
+          - action: climate.set_hvac_mode
+            target:
+              entity_id: !input klima_entity
+            data:
+              hvac_mode: fan_only
+          - action: climate.set_preset_mode
+            target:
+              entity_id: !input klima_entity
+            data:
+              preset_mode: boost
+          - delay:
+              seconds: 20
+          - action: climate.set_hvac_mode
+            target:
+              entity_id: !input klima_entity
+            data:
+              hvac_mode: "off"
       - conditions:
           - condition: template
             value_template: "{{ ziel in ['off_zeit','off_stabil'] }}"
