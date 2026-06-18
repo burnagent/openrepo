@@ -43,7 +43,7 @@ variables:
         else 'halten'))))))))) }}
   did_act: >-
     {{ ziel in ['off_zeit','off_stabil','heizen','kuehlen','kuehl_fan_auto','kuehl_fan_low','kuehl_windfree'] }}
-  notify: "{{ in_window or ziel == 'off_zeit' }}"
+  notify: "{{ did_act }}"
   status: >-
     Modus {{ {'off':'Aus','cool':'Kühlen','heat':'Heizen'}.get(mode, mode)
     }}{% if mode == 'cool' %} (Lüfter {{ fan }}, Preset {{ preset }}){% elif mode == 'heat' %} (Lüfter {{ fan }}){% endif %} · aktuell {{ temp_str }} °C
@@ -202,8 +202,7 @@ actions:
           notification_id: "klima_{{ klima | replace('.','_') }}_{{ now().timestamp() | int }}"
           title: "Klima {{ state_attr(klima,'friendly_name') or klima }}"
           message: >-
-            {{ now().strftime('%d.%m. %H:%M') }} · {{ 'AKTION' if did_act else
-            'keine Aktion' }} — Stand: {{ status }} — Grund: {{ grund }}
+            {{ now().strftime('%d.%m. %H:%M') }} · {{ grund }} — vorher: {{ status }}
 
 mode: single
 max_exceeded: silent
