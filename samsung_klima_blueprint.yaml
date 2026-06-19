@@ -9,8 +9,9 @@ blueprint:
     Prüfung im aktiven Fenster eine Mitteilung mit aktuellem Stand UND
     Begründung, warum gerade etwas gemacht wird – oder bewusst nicht.
     Zusätzliches Stoßlüften: Liegt die Außentemperatur über 24 °C, wird im
-    Zeitfenster (08–20 Uhr) alle 30 Minuten 20 s lang fan_only + Boost
+    Zeitfenster (08–20 Uhr) alle 15 Minuten 40 s lang fan_only + Boost
     geschaltet und danach wieder ausgeschaltet (optionaler Außensensor-Input).
+    Das Stoßlüften erzeugt bewusst KEINE Mitteilung (sonst Meldungsflut).
     Generischer Klon von Charlys Steuerung – pro Raum nur die climate-Entität
     auswählen (Charly, Henry, Schlafzimmer, Büro …).
   domain: automation
@@ -27,7 +28,7 @@ blueprint:
       description: >-
         Sensor der Außentemperatur. Steuert die Stoßlüftung: Wenn die
         Außentemperatur über 24 °C liegt, wird im Zeitfenster (08–20 Uhr) alle
-        30 Minuten 20 Sekunden lang fan_only + Boost geschaltet und danach
+        15 Minuten 40 Sekunden lang fan_only + Boost geschaltet und danach
         wieder ausgeschaltet (nur bei ausgeschaltetem Gerät). Vorbelegt mit dem
         Helper „Aussentemperatur Met.no". Feld leeren = Stoßlüftung deaktiviert.
       default: sensor.aussentemperatur_met_no
@@ -65,7 +66,7 @@ variables:
         else 'halten'))))))))) }}
   did_act: >-
     {{ ziel in ['off_zeit','off_stabil','heizen','kuehlen','kuehl_windfree','durchlueften'] }}
-  notify: "{{ did_act }}"
+  notify: "{{ did_act and ziel != 'durchlueften' }}"
   status: >-
     Modus {{ {'off':'Aus','cool':'Kühlen','heat':'Heizen'}.get(mode, mode)
     }}{% if mode == 'cool' %} (Lüfter {{ fan }}, Preset {{ preset }}){% elif mode == 'heat' %} (Lüfter {{ fan }}){% endif %} · aktuell {{ temp_str }} °C
@@ -76,7 +77,7 @@ variables:
       'heizen': 'Raum < 20 °C → Heizen, Lüfter low, Ziel 22 °C',
       'kuehlen': 'Raum > 24 °C → Kühlen WindFree (Lüfter Auto), Ziel 22 °C',
       'kuehl_windfree': 'Kühlen aktiv → WindFree + Lüfter Auto wiederhergestellt',
-      'durchlueften': 'Gerät aus & außen ' ~ aussen_str ~ ' °C (> 24) → 20 s Stoßlüften (fan_only + Boost), dann aus',
+      'durchlueften': 'Gerät aus & außen ' ~ aussen_str ~ ' °C (> 24) → 40 s Stoßlüften (fan_only + Boost), dann aus',
       'purge_aus': 'Stoßlüft-Intervall übersprungen (außen ' ~ aussen_str ~ ' °C ≤ 24, kein Sensor, oder Gerät kühlt/heizt → Kühlen/Heizen hat Vorrang)',
       'halten': 'im Zielbereich (20–24 °C) bzw. kein Moduswechsel nötig → keine Änderung',
       'aus_zeitfenster': 'außerhalb Zeitfenster (08–20 Uhr) → keine Steuerung',
