@@ -163,6 +163,14 @@ blueprint:
       default: center
       selector:
         text:
+    debug_notification:
+      name: Debug-Benachrichtigung
+      description: >-
+        Aktiviert eine persistent_notification bei jedem Lauf – auch wenn
+        keine Aktion nötig ist. Nur zum Debuggen einschalten (erzeugt viele Meldungen).
+      default: false
+      selector:
+        boolean:
 
 variables:
   clima: !input klima_entity
@@ -244,6 +252,7 @@ variables:
   txt_ziel: >-
     {{ {'aus':'Aus','heizen_normal':'Heizen - normal','heizen_swing':'Heizen - Swing',
         'kuehlen_low':'Kühlen - stark','kuehlen_diffuse':'Kühlen - leise'}.get(ziel, ziel) }}
+  debug: !input debug_notification
 
 triggers:
   - trigger: state
@@ -316,6 +325,20 @@ actions:
             string).replace('.', ',') if ht1 is not none else '—' }} · {{ name2 }}
             {{ (ht2 | round(1) | string).replace('.', ',') if ht2 is not none else
             '—' }})
+  - if:
+      - condition: template
+        value_template: "{{ debug and not act }}"
+    then:
+      - action: persistent_notification.create
+        data:
+          notification_id: "klima_debug_{{ clima | replace('.','_') }}"
+          title: "🔍 Debug {{ state_attr(clima,'friendly_name') or clima }}"
+          message: >-
+            {{ now().strftime('%d.%m. %H:%M') }} · kein Schaltbefehl
+            — raum {{ (raum | round(1) | string).replace('.',',') }} °C
+            · ziel: {{ ziel }}
+            · locked: {{ locked }}
+            · act: {{ act }}
 
 mode: single
 max_exceeded: silent
