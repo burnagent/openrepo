@@ -103,7 +103,7 @@ triggers:
     entity_id: !input klima_entity
     attribute: current_temperature
     above: 21
-    below: 23
+    below: 24
     for:
       minutes: 15
     id: t_stable
