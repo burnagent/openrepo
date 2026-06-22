@@ -209,7 +209,10 @@ variables:
   is_cooling: "{{ hvac == 'cool' }}"
   last_chg: >-
     {{ states[clima].last_changed if states[clima] is not none else now() }}
-  run_min: "{{ (now() - last_chg).total_seconds() / 60 }}"
+  # HA serialisiert das datetime in 'last_chg' (variables:) zu einem String –
+  # daher vor dem Rechnen mit as_datetime() zurückwandeln (sonst TypeError
+  # "unsupported operand type(s) for -: 'datetime.datetime' and 'str'").
+  run_min: "{{ (now() - as_datetime(last_chg)).total_seconds() / 60 }}"
   min_runtime_ok: "{{ run_min >= min_laufzeit }}"
   locked: "{{ (is_heating or is_cooling) and not min_runtime_ok }}"
   cool_needed: "{{ valid and raum >= kuehlen_ein }}"
