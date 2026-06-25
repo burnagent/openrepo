@@ -107,12 +107,26 @@ blueprint:
           step: 0.5
           unit_of_measurement: "°C"
     kuehlen_stark_ueber:
-      name: "Kühlen: starke Stufe über (°C)"
+      name: "Kühlen: starke Stufe ein über (°C)"
       default: 28
       selector:
         number:
           min: 22
           max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+    kuehlen_stark_aus:
+      name: "Kühlen: starke Stufe aus unter (°C, Hysterese)"
+      description: >-
+        Untere Schwelle der starken Kühlstufe. Liegt der Mittelwert zwischen
+        dieser Schwelle und „starke Stufe ein über", bleibt die aktuell
+        laufende Stufe erhalten (Totband gegen Pendeln stark↔leise). Muss
+        unter „starke Stufe ein über" liegen.
+      default: 26
+      selector:
+        number:
+          min: 20
+          max: 34
           step: 0.5
           unit_of_measurement: "°C"
     heizen_swing_unter:
@@ -185,6 +199,7 @@ variables:
   heizen_ein: !input heizen_ein
   heizen_aus: !input heizen_aus
   kuehlen_stark_ueber: !input kuehlen_stark_ueber
+  kuehlen_stark_aus: !input kuehlen_stark_aus
   heizen_swing_unter: !input heizen_swing_unter
   min_laufzeit: !input min_laufzeit
   fan_stark: !input fan_stark
@@ -221,16 +236,8 @@ variables:
   heat_done: "{{ valid and raum >= heizen_aus }}"
   want_cool: "{{ cool_needed or (is_cooling and not cool_done) }}"
   want_heat: "{{ heat_needed or (is_heating and not heat_done) }}"
-  ziel: |-
-    {{
-      'skip' if not valid else
-      (('kuehlen_low' if raum > kuehlen_stark_ueber else 'kuehlen_diffuse')
-        if (want_cool and not (locked and is_heating)) else
-      (('heizen_swing' if raum < heizen_swing_unter else 'heizen_normal')
-        if (want_heat and not (locked and is_cooling)) else
-      ('aus' if (((is_heating or is_cooling) and min_runtime_ok) or hvac == 'off')
-        else 'halten')))
-    }}
+  # 'ist' steht bewusst vor 'ziel': die Totband-Logik unten braucht die aktuell
+  # laufende Kühlstufe (HA rendert Variablen von oben nach unten).
   ist: |-
     {{
       'aus' if hvac == 'off' else
@@ -238,6 +245,23 @@ variables:
         if hvac == 'heat' else
       (('kuehlen_low' if state_attr(clima, 'fan_mode') == fan_stark else 'kuehlen_diffuse')
         if hvac == 'cool' else hvac))
+    }}
+  # Starke Kühlstufe mit Totband: ein ab 'kuehlen_stark_ueber', aus erst unter
+  # 'kuehlen_stark_aus'. Dazwischen bleibt die laufende Stufe stehen, damit der
+  # Lüfter nicht zwischen stark/leise pendelt. ('valid and' davor schützt vor
+  # dem Vergleich mit raum=None.)
+  cool_stark: >-
+    {{ valid and (raum > kuehlen_stark_ueber
+       or (ist == 'kuehlen_low' and raum > kuehlen_stark_aus)) }}
+  ziel: |-
+    {{
+      'skip' if not valid else
+      (('kuehlen_low' if cool_stark else 'kuehlen_diffuse')
+        if (want_cool and not (locked and is_heating)) else
+      (('heizen_swing' if raum < heizen_swing_unter else 'heizen_normal')
+        if (want_heat and not (locked and is_cooling)) else
+      ('aus' if (((is_heating or is_cooling) and min_runtime_ok) or hvac == 'off')
+        else 'halten')))
     }}
   act: "{{ ziel not in ['skip', 'halten'] and ziel != ist }}"
   d_mode: |-
