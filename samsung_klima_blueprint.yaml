@@ -1,15 +1,17 @@
 blueprint:
-  name: Samsung WindFree – Raumtemperatur halten (20–24 °C, 8–20 Uhr)
+  name: Samsung WindFree – Raumtemperatur halten (20–24 °C, Zeitfenster & Preset konfigurierbar)
   description: >-
-    Hält die Raumtemperatur tagsüber (08:00–20:00) zwischen 20 und 24 °C,
-    Zieltemperatur 22 °C. Kühlen: ausschließlich WindFree mit Lüfter Auto.
-    Heizen: Lüfter low, wenn unter 20 °C. Schaltet ab, wenn 21–23 °C 15 Min
-    stabil sind, sowie um 20:00 Uhr.
+    Hält die Raumtemperatur im einstellbaren Zeitfenster (Standard 08:00–21:00)
+    zwischen 20 und 24 °C, Zieltemperatur 22 °C. Das Zeitfenster lässt sich per
+    Schalter auch ganz deaktivieren (dann rund um die Uhr aktiv). Kühlen:
+    wählbarer Preset (Standard WindFree mit Lüfter Auto). Heizen: Lüfter low,
+    wenn unter 20 °C. Schaltet ab, wenn 21–23 °C 15 Min stabil sind, sowie zur
+    eingestellten Stopp-Zeit.
     Prüft alle 5 Minuten (zusätzlich ereignisgesteuert) und schreibt bei JEDER
     Prüfung im aktiven Fenster eine Mitteilung mit aktuellem Stand UND
     Begründung, warum gerade etwas gemacht wird – oder bewusst nicht.
     Zusätzliches Stoßlüften: Liegt die Außentemperatur über 24 °C, wird im
-    Zeitfenster (08–20 Uhr) alle 15 Minuten 40 s lang fan_only + Boost
+    aktiven Zeitfenster alle 15 Minuten 40 s lang fan_only + Boost
     geschaltet und danach wieder ausgeschaltet (optionaler Außensensor-Input).
     Das Stoßlüften erzeugt bewusst KEINE Mitteilung (sonst Meldungsflut).
     Generischer Klon von Charlys Steuerung – pro Raum nur die climate-Entität
@@ -27,7 +29,7 @@ blueprint:
       name: Außentemperatur-Sensor (optional)
       description: >-
         Sensor der Außentemperatur. Steuert die Stoßlüftung: Wenn die
-        Außentemperatur über 24 °C liegt, wird im Zeitfenster (08–20 Uhr) alle
+        Außentemperatur über 24 °C liegt, wird im aktiven Zeitfenster alle
         15 Minuten 40 Sekunden lang fan_only + Boost geschaltet und danach
         wieder ausgeschaltet (nur bei ausgeschaltetem Gerät). Vorbelegt mit dem
         Helper „Aussentemperatur Met.no". Feld leeren = Stoßlüftung deaktiviert.
@@ -37,24 +39,75 @@ blueprint:
           filter:
             - domain: sensor
               device_class: temperature
+    zeitfenster_aktiv:
+      name: Zeitfenster aktiv
+      description: >-
+        Wenn aktiviert (Standard), steuert die Automation nur innerhalb des
+        unten eingestellten Zeitfensters und schaltet zur Stopp-Zeit ab.
+        Deaktiviert = rund um die Uhr aktiv, keine Zeitabschaltung.
+      default: true
+      selector:
+        boolean: {}
+    start_zeit:
+      name: Startzeit (Fensterbeginn)
+      description: >-
+        Ab dieser Uhrzeit wird gesteuert – nur wirksam, wenn „Zeitfenster aktiv"
+        eingeschaltet ist.
+      default: "08:00:00"
+      selector:
+        time: {}
+    stop_zeit:
+      name: Stoppzeit (Fensterende / Abschaltung)
+      description: >-
+        Zu dieser Uhrzeit wird abgeschaltet, danach wird bis zur nächsten
+        Startzeit nicht mehr gesteuert – nur wirksam, wenn „Zeitfenster aktiv"
+        eingeschaltet ist.
+      default: "21:00:00"
+      selector:
+        time: {}
+    preset_kuehlen:
+      name: Kühl-Preset
+      description: >-
+        Welcher Samsung-Preset beim Kühlen verwendet und gehalten wird. In allen
+        Fällen läuft der Lüfter auf „auto" – alle Presets nutzen auto, deshalb
+        wird auto beim Kühlen immer mitgesetzt und gehalten. „none" bedeutet
+        keinen Sondermodus und muss vom Gerät unterstützt werden.
+      default: wind_free
+      selector:
+        select:
+          options:
+            - wind_free
+            - quiet
+            - motion_indirect
+            - none
 
 variables:
   klima: !input klima_entity
   aussen_id: !input aussen_entity
+  fenster_aktiv: !input zeitfenster_aktiv
+  start_str: !input start_zeit
+  stop_str: !input stop_zeit
+  preset_soll: !input preset_kuehlen
   trig: "{{ trigger.id | default('manual') }}"
   temp: "{{ state_attr(klima,'current_temperature') | float(none) }}"
   mode: "{{ states(klima) }}"
   fan: "{{ state_attr(klima,'fan_mode') }}"
   preset: "{{ state_attr(klima,'preset_mode') }}"
+  preset_ist: >-
+    {{ 'none' if (preset is none or preset | string in ['none','None','']) else preset }}
   aussen: >-
     {{ states(aussen_id) | float(none) if aussen_id not in [none, ''] else none }}
-  in_window: "{{ 8 <= now().hour < 20 }}"
+  jetzt_hms: "{{ now().strftime('%H:%M:%S') }}"
+  in_window: >-
+    {{ (not fenster_aktiv) or
+       ((start_str <= jetzt_hms < stop_str) if start_str <= stop_str
+        else (jetzt_hms >= start_str or jetzt_hms < stop_str)) }}
   temp_str: >-
     {{ (temp | round(1) | string).replace('.', ',') if temp is not none else '—' }}
   aussen_str: >-
     {{ (aussen | round(1) | string).replace('.', ',') if aussen is not none else '—' }}
   ziel: >-
-    {{ ('off_zeit' if trig == 't_offtime'
+    {{ ('off_zeit' if (trig == 't_offtime' and fenster_aktiv)
         else ('aus_zeitfenster' if not in_window
         else ('durchlueften' if (trig == 't_purge' and aussen is not none and aussen > 24 and mode == 'off')
         else ('purge_aus' if trig == 't_purge'
@@ -62,25 +115,25 @@ variables:
         else ('off_stabil' if (trig == 't_stable' and mode != 'off')
         else ('heizen' if (temp < 20 and mode != 'heat')
         else ('kuehlen' if (temp > 24 and mode != 'cool')
-        else ('kuehl_windfree' if (mode == 'cool' and (preset != 'wind_free' or fan != 'auto'))
+        else ('kuehl_preset' if (mode == 'cool' and ((preset_ist != preset_soll) or (fan != 'auto')))
         else 'halten'))))))))) }}
   did_act: >-
-    {{ ziel in ['off_zeit','off_stabil','heizen','kuehlen','kuehl_windfree','durchlueften'] }}
+    {{ ziel in ['off_zeit','off_stabil','heizen','kuehlen','kuehl_preset','durchlueften'] }}
   notify: "{{ did_act and ziel != 'durchlueften' }}"
   status: >-
     Modus {{ {'off':'Aus','cool':'Kühlen','heat':'Heizen'}.get(mode, mode)
     }}{% if mode == 'cool' %} (Lüfter {{ fan }}, Preset {{ preset }}){% elif mode == 'heat' %} (Lüfter {{ fan }}){% endif %} · aktuell {{ temp_str }} °C
   grund: >-
     {{ {
-      'off_zeit': 'Zeitfenster-Ende 20:00 Uhr → Anlage aus',
+      'off_zeit': 'Zeitfenster-Ende ' ~ stop_str[:5] ~ ' Uhr → Anlage aus',
       'off_stabil': '21–23 °C seit 15 Min stabil → Anlage aus',
       'heizen': 'Raum < 20 °C → Heizen, Lüfter low, Ziel 22 °C',
-      'kuehlen': 'Raum > 24 °C → Kühlen WindFree (Lüfter Auto), Ziel 22 °C',
-      'kuehl_windfree': 'Kühlen aktiv → WindFree + Lüfter Auto wiederhergestellt',
+      'kuehlen': 'Raum > 24 °C → Kühlen Preset ' ~ preset_soll ~ ' (Lüfter Auto), Ziel 22 °C',
+      'kuehl_preset': 'Kühlen aktiv → Preset ' ~ preset_soll ~ ' + Lüfter Auto wiederhergestellt',
       'durchlueften': 'Gerät aus & außen ' ~ aussen_str ~ ' °C (> 24) → 40 s Stoßlüften (fan_only + Boost), dann aus',
       'purge_aus': 'Stoßlüft-Intervall übersprungen (außen ' ~ aussen_str ~ ' °C ≤ 24, kein Sensor, oder Gerät kühlt/heizt → Kühlen/Heizen hat Vorrang)',
       'halten': 'im Zielbereich (20–24 °C) bzw. kein Moduswechsel nötig → keine Änderung',
-      'aus_zeitfenster': 'außerhalb Zeitfenster (08–20 Uhr) → keine Steuerung',
+      'aus_zeitfenster': 'außerhalb Zeitfenster (' ~ start_str[:5] ~ '–' ~ stop_str[:5] ~ ' Uhr) → keine Steuerung',
       'kein_wert': 'keine aktuelle Temperatur verfügbar → keine Steuerung'
     }.get(ziel, ziel) }}
 
@@ -123,7 +176,7 @@ triggers:
     minutes: "47"
     id: t_purge
   - trigger: time
-    at: "20:00:00"
+    at: !input stop_zeit
     id: t_offtime
 
 conditions: []
@@ -193,6 +246,7 @@ actions:
               entity_id: !input klima_entity
             data:
               temperature: 22
+          # Lüfter immer auto (alle Presets laufen mit auto), dann Preset setzen.
           - action: climate.set_fan_mode
             target:
               entity_id: !input klima_entity
@@ -202,10 +256,10 @@ actions:
             target:
               entity_id: !input klima_entity
             data:
-              preset_mode: wind_free
+              preset_mode: !input preset_kuehlen
       - conditions:
           - condition: template
-            value_template: "{{ ziel == 'kuehl_windfree' }}"
+            value_template: "{{ ziel == 'kuehl_preset' }}"
         sequence:
           - action: climate.set_fan_mode
             target:
@@ -216,7 +270,7 @@ actions:
             target:
               entity_id: !input klima_entity
             data:
-              preset_mode: wind_free
+              preset_mode: !input preset_kuehlen
     default: []
   - if:
       - condition: template
