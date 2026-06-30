@@ -1,12 +1,14 @@
 blueprint:
-  name: Samsung WindFree – Raumtemperatur halten (20–24 °C, Zeitfenster & Preset konfigurierbar)
+  name: Samsung WindFree – Raumtemperatur halten (Zieltemperatur & Totband ±2 °C, Zeitfenster & Preset konfigurierbar)
   description: >-
     Hält die Raumtemperatur im einstellbaren Zeitfenster (Standard 08:00–21:00)
-    zwischen 20 und 24 °C, Zieltemperatur 22 °C. Das Zeitfenster lässt sich per
-    Schalter auch ganz deaktivieren (dann rund um die Uhr aktiv). Kühlen:
-    wählbarer Preset (Standard WindFree mit Lüfter Auto). Heizen: Lüfter low,
-    wenn unter 20 °C. Schaltet ab, wenn 21–23 °C 15 Min stabil sind, sowie zur
-    eingestellten Stopp-Zeit.
+    auf der wählbaren Zieltemperatur (Standard 23 °C). Das Totband ergibt sich
+    automatisch als Ziel ± 2 °C: unterhalb (Ziel − 2 °C) wird geheizt, oberhalb
+    (Ziel + 2 °C) gekühlt (Default-Ziel 23 °C → Band 21–25 °C). Das Zeitfenster
+    lässt sich per Schalter auch ganz deaktivieren (dann rund um die Uhr aktiv).
+    Kühlen: wählbarer Preset (Standard WindFree mit Lüfter Auto). Heizen: Lüfter
+    low. Schaltet ab, wenn die Temperatur 15 Min im oberen Totband stabil ist
+    ((Ziel − 1 °C) bis (Ziel + 2 °C)), sowie zur eingestellten Stopp-Zeit.
     Prüft alle 5 Minuten (zusätzlich ereignisgesteuert) und schreibt bei JEDER
     Prüfung im aktiven Fenster eine Mitteilung mit aktuellem Stand UND
     Begründung, warum gerade etwas gemacht wird – oder bewusst nicht.
@@ -80,6 +82,26 @@ blueprint:
             - quiet
             - motion_indirect
             - none
+    ziel_temp:
+      name: Zieltemperatur
+      description: >-
+        Wunsch-Raumtemperatur, auf die geheizt/gekühlt wird. Das Totband ergibt
+        sich automatisch als Ziel ± 2 °C: unterhalb (Ziel − 2 °C) → Heizen,
+        oberhalb (Ziel + 2 °C) → Kühlen. Beispiel: Ziel 23 °C → Band 21–25 °C.
+      default: 23
+      selector:
+        number:
+          min: 16
+          max: 30
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: box
+
+# Inputs in Triggern nur über trigger_variables nutzbar (für die
+# temperaturabhängigen Template-Trigger, die das Totband mitführen).
+trigger_variables:
+  klima_tv: !input klima_entity
+  ziel_tv: !input ziel_temp
 
 variables:
   klima: !input klima_entity
@@ -88,6 +110,17 @@ variables:
   start_str: !input start_zeit
   stop_str: !input stop_zeit
   preset_soll: !input preset_kuehlen
+  ziel_temp: !input ziel_temp
+  # Totband automatisch = Ziel ± 2 °C; oberes Stabil-Band = (Ziel − 1) … (Ziel + 2).
+  grenze_unten: "{{ ziel_temp - 2 }}"
+  grenze_oben: "{{ ziel_temp + 2 }}"
+  stable_unten: "{{ ziel_temp - 1 }}"
+  stable_oben: "{{ ziel_temp + 2 }}"
+  ziel_str: "{{ ('%g' % ziel_temp).replace('.', ',') }}"
+  unten_str: "{{ ('%g' % grenze_unten).replace('.', ',') }}"
+  oben_str: "{{ ('%g' % grenze_oben).replace('.', ',') }}"
+  stable_unten_str: "{{ ('%g' % stable_unten).replace('.', ',') }}"
+  stable_oben_str: "{{ ('%g' % stable_oben).replace('.', ',') }}"
   trig: "{{ trigger.id | default('manual') }}"
   temp: "{{ state_attr(klima,'current_temperature') | float(none) }}"
   mode: "{{ states(klima) }}"
@@ -113,8 +146,8 @@ variables:
         else ('purge_aus' if trig == 't_purge'
         else ('kein_wert' if temp is none
         else ('off_stabil' if (trig == 't_stable' and mode != 'off')
-        else ('heizen' if (temp < 20 and mode != 'heat')
-        else ('kuehlen' if (temp > 24 and mode != 'cool')
+        else ('heizen' if (temp < grenze_unten and mode != 'heat')
+        else ('kuehlen' if (temp > grenze_oben and mode != 'cool')
         else ('kuehl_preset' if (mode == 'cool' and ((preset_ist != preset_soll) or (fan != 'auto')))
         else 'halten'))))))))) }}
   did_act: >-
@@ -126,37 +159,39 @@ variables:
   grund: >-
     {{ {
       'off_zeit': 'Zeitfenster-Ende ' ~ stop_str[:5] ~ ' Uhr → Anlage aus',
-      'off_stabil': '21–23 °C seit 15 Min stabil → Anlage aus',
-      'heizen': 'Raum < 20 °C → Heizen, Lüfter low, Ziel 22 °C',
-      'kuehlen': 'Raum > 24 °C → Kühlen Preset ' ~ preset_soll ~ ' (Lüfter Auto), Ziel 22 °C',
+      'off_stabil': stable_unten_str ~ '–' ~ stable_oben_str ~ ' °C seit 15 Min stabil → Anlage aus',
+      'heizen': 'Raum < ' ~ unten_str ~ ' °C → Heizen, Lüfter low, Ziel ' ~ ziel_str ~ ' °C',
+      'kuehlen': 'Raum > ' ~ oben_str ~ ' °C → Kühlen Preset ' ~ preset_soll ~ ' (Lüfter Auto), Ziel ' ~ ziel_str ~ ' °C',
       'kuehl_preset': 'Kühlen aktiv → Preset ' ~ preset_soll ~ ' + Lüfter Auto wiederhergestellt',
       'durchlueften': 'Gerät aus & außen ' ~ aussen_str ~ ' °C (> 24) → 40 s Stoßlüften (fan_only + Boost), dann aus',
       'purge_aus': 'Stoßlüft-Intervall übersprungen (außen ' ~ aussen_str ~ ' °C ≤ 24, kein Sensor, oder Gerät kühlt/heizt → Kühlen/Heizen hat Vorrang)',
-      'halten': 'im Zielbereich (20–24 °C) bzw. kein Moduswechsel nötig → keine Änderung',
+      'halten': 'im Zielbereich (' ~ unten_str ~ '–' ~ oben_str ~ ' °C) bzw. kein Moduswechsel nötig → keine Änderung',
       'aus_zeitfenster': 'außerhalb Zeitfenster (' ~ start_str[:5] ~ '–' ~ stop_str[:5] ~ ' Uhr) → keine Steuerung',
       'kein_wert': 'keine aktuelle Temperatur verfügbar → keine Steuerung'
     }.get(ziel, ziel) }}
 
 triggers:
-  - trigger: numeric_state
-    entity_id: !input klima_entity
-    attribute: current_temperature
-    above: 24
+  # Temperaturschwellen folgen dem Totband (Ziel ± 2 °C) bzw. dem oberen
+  # Stabil-Band ((Ziel − 1) … (Ziel + 2) °C) – daher Template- statt
+  # numeric_state-Trigger, die ziel_tv aus trigger_variables nutzen.
+  - trigger: template
+    value_template: >-
+      {% set t = state_attr(klima_tv,'current_temperature') | float(none) %}
+      {{ t is not none and t > (ziel_tv + 2) }}
     for:
       minutes: 5
     id: t_warm
-  - trigger: numeric_state
-    entity_id: !input klima_entity
-    attribute: current_temperature
-    below: 20
+  - trigger: template
+    value_template: >-
+      {% set t = state_attr(klima_tv,'current_temperature') | float(none) %}
+      {{ t is not none and t < (ziel_tv - 2) }}
     for:
       minutes: 5
     id: t_cold
-  - trigger: numeric_state
-    entity_id: !input klima_entity
-    attribute: current_temperature
-    above: 21
-    below: 24
+  - trigger: template
+    value_template: >-
+      {% set t = state_attr(klima_tv,'current_temperature') | float(none) %}
+      {{ t is not none and t > (ziel_tv - 1) and t < (ziel_tv + 2) }}
     for:
       minutes: 15
     id: t_stable
@@ -231,7 +266,7 @@ actions:
             target:
               entity_id: !input klima_entity
             data:
-              temperature: 22
+              temperature: !input ziel_temp
       - conditions:
           - condition: template
             value_template: "{{ ziel == 'kuehlen' }}"
@@ -245,7 +280,7 @@ actions:
             target:
               entity_id: !input klima_entity
             data:
-              temperature: 22
+              temperature: !input ziel_temp
           # Lüfter immer auto (alle Presets laufen mit auto), dann Preset setzen.
           - action: climate.set_fan_mode
             target:
