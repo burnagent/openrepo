@@ -1,20 +1,21 @@
 blueprint:
-  name: Samsung WindFree – Raumtemperatur halten (Zieltemperatur & Totband ±2 °C, Zeitfenster & Preset konfigurierbar)
+  name: Samsung WindFree – Raumtemperatur halten (Zieltemperatur, Totband & Stoßlüften konfigurierbar)
   description: >-
     Hält die Raumtemperatur im einstellbaren Zeitfenster (Standard 08:00–21:00)
-    auf der wählbaren Zieltemperatur (Standard 23 °C). Das Totband ergibt sich
-    automatisch als Ziel ± 2 °C: unterhalb (Ziel − 2 °C) wird geheizt, oberhalb
-    (Ziel + 2 °C) gekühlt (Default-Ziel 23 °C → Band 21–25 °C). Das Zeitfenster
-    lässt sich per Schalter auch ganz deaktivieren (dann rund um die Uhr aktiv).
-    Kühlen: wählbarer Preset (Standard WindFree mit Lüfter Auto). Heizen: Lüfter
-    low. Schaltet ab, wenn die Temperatur 15 Min im oberen Totband stabil ist
-    ((Ziel − 1 °C) bis (Ziel + 2 °C)), sowie zur eingestellten Stopp-Zeit.
-    Prüft alle 5 Minuten (zusätzlich ereignisgesteuert) und schreibt bei JEDER
-    Prüfung im aktiven Fenster eine Mitteilung mit aktuellem Stand UND
+    auf der wählbaren Zieltemperatur (Standard 23 °C). Das Totband ist getrennt
+    nach oben und unten einstellbar (Default je 1 °C → Band 22–24 °C bei Ziel
+    23 °C): unterhalb (Ziel − Band unten) wird geheizt, oberhalb (Ziel + Band
+    oben) gekühlt. Das Zeitfenster lässt sich per Schalter auch ganz
+    deaktivieren (dann rund um die Uhr aktiv). Kühlen: wählbarer Preset
+    (Standard WindFree mit Lüfter Auto). Heizen: Lüfter low. Schaltet ab, wenn
+    die Temperatur 15 Min im oberen Totband stabil ist, sowie zur eingestellten
+    Stopp-Zeit. Prüft alle 5 Minuten (zusätzlich ereignisgesteuert) und schreibt
+    bei JEDER Prüfung im aktiven Fenster eine Mitteilung mit aktuellem Stand UND
     Begründung, warum gerade etwas gemacht wird – oder bewusst nicht.
-    Zusätzliches Stoßlüften: Liegt die Außentemperatur über 24 °C, wird im
-    aktiven Zeitfenster alle 15 Minuten 40 s lang fan_only + Boost
-    geschaltet und danach wieder ausgeschaltet (optionaler Außensensor-Input).
+    Optionales Stoßlüften (per Setting ein-/ausschaltbar): Liegt die
+    Außentemperatur über der einstellbaren Schwelle (Standard 24 °C), wird im
+    aktiven Zeitfenster alle 15 Minuten 40 s lang fan_only + Boost geschaltet
+    und danach wieder ausgeschaltet.
     Das Stoßlüften erzeugt bewusst KEINE Mitteilung (sonst Meldungsflut).
     Generischer Klon von Charlys Steuerung – pro Raum nur die climate-Entität
     auswählen (Charly, Henry, Schlafzimmer, Büro …).
@@ -30,11 +31,9 @@ blueprint:
     aussen_entity:
       name: Außentemperatur-Sensor (optional)
       description: >-
-        Sensor der Außentemperatur. Steuert die Stoßlüftung: Wenn die
-        Außentemperatur über 24 °C liegt, wird im aktiven Zeitfenster alle
-        15 Minuten 40 Sekunden lang fan_only + Boost geschaltet und danach
-        wieder ausgeschaltet (nur bei ausgeschaltetem Gerät). Vorbelegt mit dem
-        Helper „Aussentemperatur Met.no". Feld leeren = Stoßlüftung deaktiviert.
+        Sensor der Außentemperatur. Wird für die Stoßlüftung benötigt (muss
+        zusätzlich über „Stoßlüften aktiv" eingeschaltet sein). Vorbelegt mit
+        dem Helper „Aussentemperatur Met.no". Feld leeren = kein Außensensor.
       default: sensor.aussentemperatur_met_no
       selector:
         entity:
@@ -86,12 +85,62 @@ blueprint:
       name: Zieltemperatur
       description: >-
         Wunsch-Raumtemperatur, auf die geheizt/gekühlt wird. Das Totband ergibt
-        sich automatisch als Ziel ± 2 °C: unterhalb (Ziel − 2 °C) → Heizen,
-        oberhalb (Ziel + 2 °C) → Kühlen. Beispiel: Ziel 23 °C → Band 21–25 °C.
+        sich aus den Einstellungen „Band oben" und „Band unten": unterhalb
+        (Ziel − Band unten) → Heizen, oberhalb (Ziel + Band oben) → Kühlen.
+        Beispiel: Ziel 23 °C, Band je 1 °C → Bereich 22–24 °C.
       default: 23
       selector:
         number:
           min: 16
+          max: 30
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: box
+    band_oben:
+      name: Band oben (Kühlen ab)
+      description: >-
+        Grad über der Zieltemperatur, ab der gekühlt wird. Beispiel: Ziel 23 °C
+        + Band oben 1 °C → Kühlen ab 24 °C.
+      default: 1
+      selector:
+        number:
+          min: 0.5
+          max: 5
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: box
+    band_unten:
+      name: Band unten (Heizen ab)
+      description: >-
+        Grad unter der Zieltemperatur, ab der geheizt wird. Beispiel: Ziel 23 °C
+        − Band unten 1 °C → Heizen unter 22 °C.
+      default: 1
+      selector:
+        number:
+          min: 0.5
+          max: 5
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: box
+    stosslueften_aktiv:
+      name: Stoßlüften aktiv
+      description: >-
+        Wenn aktiviert, wird bei Außentemperatur über der eingestellten Schwelle
+        alle 15 Minuten 40 Sekunden lang fan_only + Boost geschaltet (nur bei
+        ausgeschaltetem Gerät und vorhandenem Außensensor). Deaktiviert = kein
+        Stoßlüften.
+      default: true
+      selector:
+        boolean: {}
+    stosslueften_temp:
+      name: Stoßlüften – Außentemperatur-Schwelle
+      description: >-
+        Ab dieser Außentemperatur wird Stoßlüften ausgelöst (nur wenn
+        „Stoßlüften aktiv" eingeschaltet ist). Standard 24 °C.
+      default: 24
+      selector:
+        number:
+          min: 10
           max: 30
           step: 0.5
           unit_of_measurement: "°C"
@@ -102,6 +151,8 @@ blueprint:
 trigger_variables:
   klima_tv: !input klima_entity
   ziel_tv: !input ziel_temp
+  band_o_tv: !input band_oben
+  band_u_tv: !input band_unten
 
 variables:
   klima: !input klima_entity
@@ -111,11 +162,14 @@ variables:
   stop_str: !input stop_zeit
   preset_soll: !input preset_kuehlen
   ziel_temp: !input ziel_temp
-  # Totband automatisch = Ziel ± 2 °C; oberes Stabil-Band = (Ziel − 1) … (Ziel + 2).
-  grenze_unten: "{{ ziel_temp - 2 }}"
-  grenze_oben: "{{ ziel_temp + 2 }}"
-  stable_unten: "{{ ziel_temp - 1 }}"
-  stable_oben: "{{ ziel_temp + 2 }}"
+  band_o: !input band_oben
+  band_u: !input band_unten
+  stosslueften: !input stosslueften_aktiv
+  stoss_temp: !input stosslueften_temp
+  grenze_unten: "{{ ziel_temp - band_u }}"
+  grenze_oben: "{{ ziel_temp + band_o }}"
+  stable_unten: "{{ ziel_temp - (band_u / 2) }}"
+  stable_oben: "{{ ziel_temp + band_o }}"
   ziel_str: "{{ ('%g' % ziel_temp).replace('.', ',') }}"
   unten_str: "{{ ('%g' % grenze_unten).replace('.', ',') }}"
   oben_str: "{{ ('%g' % grenze_oben).replace('.', ',') }}"
@@ -142,7 +196,7 @@ variables:
   ziel: >-
     {{ ('off_zeit' if (trig == 't_offtime' and fenster_aktiv)
         else ('aus_zeitfenster' if not in_window
-        else ('durchlueften' if (trig == 't_purge' and aussen is not none and aussen > 24 and mode == 'off')
+        else ('durchlueften' if (trig == 't_purge' and stosslueften and aussen is not none and aussen > stoss_temp and mode == 'off')
         else ('purge_aus' if trig == 't_purge'
         else ('kein_wert' if temp is none
         else ('off_stabil' if (trig == 't_stable' and mode != 'off')
@@ -163,35 +217,35 @@ variables:
       'heizen': 'Raum < ' ~ unten_str ~ ' °C → Heizen, Lüfter low, Ziel ' ~ ziel_str ~ ' °C',
       'kuehlen': 'Raum > ' ~ oben_str ~ ' °C → Kühlen Preset ' ~ preset_soll ~ ' (Lüfter Auto), Ziel ' ~ ziel_str ~ ' °C',
       'kuehl_preset': 'Kühlen aktiv → Preset ' ~ preset_soll ~ ' + Lüfter Auto wiederhergestellt',
-      'durchlueften': 'Gerät aus & außen ' ~ aussen_str ~ ' °C (> 24) → 40 s Stoßlüften (fan_only + Boost), dann aus',
-      'purge_aus': 'Stoßlüft-Intervall übersprungen (außen ' ~ aussen_str ~ ' °C ≤ 24, kein Sensor, oder Gerät kühlt/heizt → Kühlen/Heizen hat Vorrang)',
+      'durchlueften': 'Gerät aus & außen ' ~ aussen_str ~ ' °C (> ' ~ ('%g' % stoss_temp).replace('.', ',') ~ ') → 40 s Stoßlüften (fan_only + Boost), dann aus',
+      'purge_aus': 'Stoßlüft-Intervall übersprungen (deaktiviert, außen ' ~ aussen_str ~ ' °C ≤ ' ~ ('%g' % stoss_temp).replace('.', ',') ~ ', kein Sensor, oder Gerät kühlt/heizt → Kühlen/Heizen hat Vorrang)',
       'halten': 'im Zielbereich (' ~ unten_str ~ '–' ~ oben_str ~ ' °C) bzw. kein Moduswechsel nötig → keine Änderung',
       'aus_zeitfenster': 'außerhalb Zeitfenster (' ~ start_str[:5] ~ '–' ~ stop_str[:5] ~ ' Uhr) → keine Steuerung',
       'kein_wert': 'keine aktuelle Temperatur verfügbar → keine Steuerung'
     }.get(ziel, ziel) }}
 
 triggers:
-  # Temperaturschwellen folgen dem Totband (Ziel ± 2 °C) bzw. dem oberen
-  # Stabil-Band ((Ziel − 1) … (Ziel + 2) °C) – daher Template- statt
-  # numeric_state-Trigger, die ziel_tv aus trigger_variables nutzen.
+  # Temperaturschwellen folgen dem konfigurierbaren Totband (band_o/band_u)
+  # bzw. dem Stabil-Band – daher Template- statt numeric_state-Trigger,
+  # die ziel_tv/band_*_tv aus trigger_variables nutzen.
   - trigger: template
     value_template: >-
       {% set t = state_attr(klima_tv,'current_temperature') | float(none) %}
-      {{ t is not none and t > (ziel_tv + 2) }}
+      {{ t is not none and t > (ziel_tv + band_o_tv) }}
     for:
       minutes: 5
     id: t_warm
   - trigger: template
     value_template: >-
       {% set t = state_attr(klima_tv,'current_temperature') | float(none) %}
-      {{ t is not none and t < (ziel_tv - 2) }}
+      {{ t is not none and t < (ziel_tv - band_u_tv) }}
     for:
       minutes: 5
     id: t_cold
   - trigger: template
     value_template: >-
       {% set t = state_attr(klima_tv,'current_temperature') | float(none) %}
-      {{ t is not none and t > (ziel_tv - 1) and t < (ziel_tv + 2) }}
+      {{ t is not none and t > (ziel_tv - (band_u_tv / 2)) and t < (ziel_tv + band_o_tv) }}
     for:
       minutes: 15
     id: t_stable
