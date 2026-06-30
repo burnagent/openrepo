@@ -166,14 +166,26 @@ blueprint:
           unit_of_measurement: "min"
     fan_stark:
       name: "Lüftermodus: stark (Rohwert)"
-      default: low
+      default: medium
       selector:
-        text:
+        select:
+          options:
+            - auto
+            - diffuse
+            - low
+            - medium
+            - high
     fan_leise:
       name: "Lüftermodus: leise (Rohwert)"
       default: diffuse
       selector:
-        text:
+        select:
+          options:
+            - auto
+            - diffuse
+            - low
+            - medium
+            - high
     pos_heizen:
       name: "Lamelle vertikal: Heizen normal (Rohwert)"
       default: angle5
@@ -193,7 +205,11 @@ blueprint:
       name: "Lamelle horizontal (Rohwert)"
       default: left
       selector:
-        text:
+        select:
+          options:
+            - left
+            - center
+            - right
     debug_notification:
       name: Debug-Benachrichtigung
       description: >-
