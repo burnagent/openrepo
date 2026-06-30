@@ -62,12 +62,29 @@ blueprint:
             - domain: sensor
               device_class: temperature
     ziel_temp:
-      name: Zieltemperatur (°C)
+      name: Zieltemperatur Heizen (°C)
+      description: >-
+        Sollwert, der beim Heizen an das Gerät gesendet wird (climate.set_temperature).
+        Steuert NICHT, wann die Automation schaltet – das machen die Ein-/Aus-Schwellen.
       default: 23
       selector:
         number:
           min: 16
           max: 28
+          step: 0.5
+          unit_of_measurement: "°C"
+    ziel_temp_kuehlen:
+      name: Zieltemperatur Kühlen (°C)
+      description: >-
+        Sollwert, der beim Kühlen an das Gerät gesendet wird. Niedriger = das
+        Gerät kühlt kräftiger durch (drosselt nicht schon an der Aus-Schwelle).
+        Wie kalt der Raum WIRKLICH wird, bestimmt aber „Kühlen beenden bei", nicht
+        dieser Wert.
+      default: 20
+      selector:
+        number:
+          min: 16
+          max: 26
           step: 0.5
           unit_of_measurement: "°C"
     kuehlen_ein:
@@ -174,7 +191,7 @@ blueprint:
         text:
     pos_horizontal:
       name: "Lamelle horizontal (Rohwert)"
-      default: center
+      default: left
       selector:
         text:
     debug_notification:
@@ -194,6 +211,7 @@ variables:
   sel_horizontal: !input sel_horizontal
   avg_entity: !input sensor_mittelwert
   ziel_temp: !input ziel_temp
+  ziel_temp_kuehlen: !input ziel_temp_kuehlen
   kuehlen_ein: !input kuehlen_ein
   kuehlen_aus: !input kuehlen_aus
   heizen_ein: !input heizen_ein
@@ -267,6 +285,8 @@ variables:
   d_mode: |-
     {{ 'cool' if ziel in ['kuehlen_low','kuehlen_diffuse']
        else ('heat' if ziel in ['heizen_normal','heizen_swing'] else 'off') }}
+  # Sollwert ans Gerät: beim Kühlen eigener (tieferer) Wert, sonst Heiz-Sollwert.
+  d_temp: "{{ ziel_temp_kuehlen if d_mode == 'cool' else ziel_temp }}"
   d_fan: "{{ fan_stark if ziel == 'kuehlen_low' else fan_leise }}"
   d_vert: |-
     {{ pos_swing if ziel == 'heizen_swing'
@@ -322,7 +342,7 @@ actions:
             target:
               entity_id: "{{ clima }}"
             data:
-              temperature: "{{ ziel_temp }}"
+              temperature: "{{ d_temp }}"
           - action: climate.set_fan_mode
             continue_on_error: true
             target:
