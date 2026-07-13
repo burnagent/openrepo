@@ -1,27 +1,20 @@
 blueprint:
-  name: Samsung WindFree – Raumtemperatur halten (Zieltemperatur, Totband & Stoßlüften
-    konfigurierbar)
-  description: 'Hält die Raumtemperatur im einstellbaren Zeitfenster (Standard 08:00–21:00)
-    auf der wählbaren Zieltemperatur (Standard 23 °C). Das Totband ist getrennt nach
-    oben und unten einstellbar (Default je 1 °C → Band 22–24 °C bei Ziel 23 °C): unterhalb
-    (Ziel − Band unten) wird geheizt, oberhalb (Ziel + Band oben) gekühlt. Das Zeitfenster
-    lässt sich per Schalter auch ganz deaktivieren (dann rund um die Uhr aktiv). Kühlen:
-    wählbarer Preset (Standard WindFree mit Lüfter Auto). Heizen: Lüfter low. Schaltet
-    ab, wenn die Temperatur 15 Min im oberen Totband stabil ist, sowie zur eingestellten
-    Stopp-Zeit. Prüft alle 5 Minuten (zusätzlich ereignisgesteuert) und schreibt bei
-    JEDER Prüfung im aktiven Fenster eine Mitteilung mit aktuellem Stand UND Begründung,
-    warum gerade etwas gemacht wird – oder bewusst nicht. Optionales Stoßlüften (per
-    Setting ein-/ausschaltbar): Liegt die Außentemperatur über der einstellbaren Schwelle
-    (Standard 24 °C), wird im aktiven Zeitfenster alle 15 Minuten 40 s lang fan_only
-    + Boost geschaltet und danach wieder ausgeschaltet. Das Stoßlüften erzeugt bewusst
-    KEINE Mitteilung (sonst Meldungsflut). Generischer Klon von Charlys Steuerung
-    – pro Raum nur die climate-Entität auswählen (Charly, Henry, Schlafzimmer, Büro
-    …).'
+  name: Klima – 2-Sensor-Mittelwert-Regelung (Heizen/Kühlen + Lamellen)
+  description: 'Generischer Klon der Esszimmer-Steuerung (Bosch). Regelt einen Raum
+    auf eine Zieltemperatur anhand des Mittelwerts zweier Temperatursensoren (optional
+    eines vorhandenen Mittelwert-Sensors). Steuert Heizen/Kühlen inkl. Lüfter und
+    vertikaler/horizontaler Lamellen-Position. Stellt nur bei echtem Zustandswechsel
+    um und meldet diesen per HA-Mitteilung mit allen Werten. Mindestlaufzeit + Hysterese
+    als Schutz gegen Pendeln.
+
+    Pro Raum nur die Entitäten auswählen – Schwellen und Geräte-Rohwerte haben Defaults
+    (passend zum Bosch im Esszimmer) und müssen nur bei abweichenden Geräten angepasst
+    werden.'
   domain: automation
   input:
     klima_entity:
       name: Klimagerät
-      description: Die climate-Entität des Samsung-WindFree-Geräts.
+      description: Die climate-Entität.
       selector:
         entity:
           filter:
@@ -29,12 +22,9 @@ blueprint:
             - climate
           multiple: false
           reorder: false
-    aussen_entity:
-      name: Außentemperatur-Sensor (optional)
-      description: Sensor der Außentemperatur. Wird für die Stoßlüftung benötigt (muss
-        zusätzlich über „Stoßlüften aktiv" eingeschaltet sein). Vorbelegt mit dem
-        Helper „Aussentemperatur Met.no". Feld leeren = kein Außensensor.
-      default: sensor.aussentemperatur_met_no
+    sensor_1:
+      name: Temperatursensor 1
+      description: Erster Raumsensor (z. B. Esstisch).
       selector:
         entity:
           filter:
@@ -44,67 +34,86 @@ blueprint:
             - temperature
           multiple: false
           reorder: false
-    zeitfenster_aktiv:
-      name: Zeitfenster aktiv
-      description: Wenn aktiviert (Standard), steuert die Automation nur innerhalb
-        des unten eingestellten Zeitfensters und schaltet zur Stopp-Zeit ab. Deaktiviert
-        = rund um die Uhr aktiv, keine Zeitabschaltung.
-      default: true
+    sensor_2:
+      name: Temperatursensor 2
+      description: Zweiter Raumsensor (z. B. Couch).
       selector:
-        boolean: {}
-    start_zeit:
-      name: Startzeit (Fensterbeginn)
-      description: Ab dieser Uhrzeit wird gesteuert – nur wirksam, wenn „Zeitfenster
-        aktiv" eingeschaltet ist.
-      default: 08:00:00
-      selector:
-        time: {}
-    stop_zeit:
-      name: Stoppzeit (Fensterende / Abschaltung)
-      description: Zu dieser Uhrzeit wird abgeschaltet, danach wird bis zur nächsten
-        Startzeit nicht mehr gesteuert – nur wirksam, wenn „Zeitfenster aktiv" eingeschaltet
-        ist.
-      default: '21:00:00'
-      selector:
-        time: {}
-    preset_kuehlen:
-      name: Kühl-Preset
-      description: Welcher Samsung-Preset beim Kühlen verwendet und gehalten wird.
-        In allen Fällen läuft der Lüfter auf „auto" – alle Presets nutzen auto, deshalb
-        wird auto beim Kühlen immer mitgesetzt und gehalten. „none" bedeutet keinen
-        Sondermodus und muss vom Gerät unterstützt werden.
-      default: wind_free
-      selector:
-        select:
-          options:
-          - wind_free
-          - quiet
-          - motion_indirect
-          - none
+        entity:
+          filter:
+          - domain:
+            - sensor
+            device_class:
+            - temperature
           multiple: false
-          sort: false
-          custom_value: false
+          reorder: false
+    sel_vertikal:
+      name: Lamellen vertikal (select)
+      description: select-Entität für die vertikale Lamellen-Position.
+      selector:
+        entity:
+          filter:
+          - domain:
+            - select
+          multiple: false
+          reorder: false
+    sel_horizontal:
+      name: Lamellen horizontal (select)
+      description: select-Entität für die horizontale Lamellen-Position.
+      selector:
+        entity:
+          filter:
+          - domain:
+            - select
+          multiple: false
+          reorder: false
+    sensor_mittelwert:
+      name: Mittelwert-Sensor (optional)
+      description: Vorhandener Mittelwert-Sensor. Wenn gesetzt, hat er Vorrang; sonst
+        wird der Mittelwert aus Sensor 1 und Sensor 2 berechnet.
+      default:
+      selector:
+        entity:
+          filter:
+          - domain:
+            - sensor
+            device_class:
+            - temperature
+          multiple: false
+          reorder: false
     ziel_temp:
-      name: Zieltemperatur
-      description: 'Wunsch-Raumtemperatur, auf die geheizt/gekühlt wird. Das Totband
-        ergibt sich aus den Einstellungen „Band oben" und „Band unten": unterhalb
-        (Ziel − Band unten) → Heizen, oberhalb (Ziel + Band oben) → Kühlen. Beispiel:
-        Ziel 23 °C, Band je 1 °C → Bereich 22–24 °C.'
+      name: Zieltemperatur Heizen (°C)
+      description: Sollwert, der beim Heizen an das Gerät gesendet wird (climate.set_temperature).
+        Steuert NICHT, wann die Automation schaltet – das machen die Ein-/Aus-Schwellen.
       default: 23
       selector:
         number:
           min: 16.0
-          max: 30.0
+          max: 28.0
           step: 0.5
           unit_of_measurement: °C
-          mode: box
+          mode: slider
+    ziel_temp_kuehlen:
+      name: Zieltemperatur Kühlen (°C)
+      description: Sollwert, der beim Kühlen an das Gerät gesendet wird. Niedriger
+        = das Gerät kühlt kräftiger durch (drosselt nicht schon an der Aus-Schwelle).
+        Wie kalt der Raum WIRKLICH wird, bestimmt aber „Kühlen beenden bei", nicht
+        dieser Wert.
+      default: 20
+      selector:
+        number:
+          min: 16.0
+          max: 26.0
+          step: 0.5
+          unit_of_measurement: °C
+          mode: slider
     ziel_temp_helper:
-      name: Zieltemperatur-Helfer (optional)
-      description: 'Optionaler input_number-Helfer, der die Zieltemperatur vorgibt
-        und z. B. per Dashboard-Slider jederzeit verstellt werden kann. Wenn gesetzt,
-        hat er Vorrang vor der festen „Zieltemperatur" oben – diese dient dann nur
-        noch als Ersatzwert, falls der Helfer keinen gültigen Wert liefert. Feld leeren
-        = fester Wert wird verwendet.'
+      name: Wunschtemperatur-Helfer (optional)
+      description: 'Optionaler input_number-Helfer für die Wunschtemperatur, per
+        Dashboard-Slider jederzeit verstellbar. Wenn er UND der Toleranz-Band-Helfer
+        gesetzt sind, gelten: Kühlen ein ab Wunsch + Band, Kühlen aus bei Wunsch,
+        starke Stufe ein über Wunsch + Band + 1, starke Stufe aus unter Wunsch +
+        Band. Die festen Schwellen unten dienen dann nur noch als Ersatzwerte,
+        falls ein Helfer keinen gültigen Wert liefert. Feld leeren = feste Werte.'
       default: ''
       selector:
         entity:
@@ -114,12 +123,10 @@ blueprint:
           multiple: false
           reorder: false
     band_oben_helper:
-      name: „Band oben"-Helfer (optional)
-      description: 'Optionaler input_number-Helfer für „Band oben" – also wie viel
-        Grad über der Zieltemperatur das Kühlen startet. Per Dashboard-Slider jederzeit
-        verstellbar (z. B. 1 oder 2 °C). Wenn gesetzt, hat er Vorrang vor dem festen
-        „Band oben" oben – dieses dient dann nur noch als Ersatzwert. Feld leeren
-        = fester Wert wird verwendet.'
+      name: Toleranz-Band-Helfer (optional)
+      description: 'Optionaler input_number-Helfer für das Toleranz-Band – also wie
+        viel Grad über der Wunschtemperatur das Kühlen startet. Nur wirksam, wenn
+        auch der Wunschtemperatur-Helfer gesetzt ist. Feld leeren = feste Werte.'
       default: ''
       selector:
         entity:
@@ -128,276 +135,320 @@ blueprint:
             - input_number
           multiple: false
           reorder: false
-    band_oben:
-      name: Band oben (Kühlen ab)
-      description: 'Grad über der Zieltemperatur, ab der gekühlt wird. Beispiel: Ziel
-        23 °C + Band oben 1 °C → Kühlen ab 24 °C.'
-      default: 1
+    kuehlen_ein:
+      name: Kühlen einschalten ab (°C)
+      default: 25
       selector:
         number:
-          min: 0.5
-          max: 5.0
+          min: 20.0
+          max: 32.0
           step: 0.5
           unit_of_measurement: °C
-          mode: box
-    band_unten:
-      name: Band unten (Heizen ab)
-      description: 'Grad unter der Zieltemperatur, ab der geheizt wird. Beispiel:
-        Ziel 23 °C − Band unten 1 °C → Heizen unter 22 °C.'
-      default: 1
+          mode: slider
+    kuehlen_aus:
+      name: Kühlen beenden bei (°C, Hysterese)
+      default: 23
       selector:
         number:
-          min: 0.5
-          max: 5.0
+          min: 18.0
+          max: 28.0
           step: 0.5
           unit_of_measurement: °C
-          mode: box
-    stosslueften_aktiv:
-      name: Stoßlüften aktiv
-      description: Wenn aktiviert, wird bei Außentemperatur über der eingestellten
-        Schwelle alle 15 Minuten 40 Sekunden lang fan_only + Boost geschaltet (nur
-        bei ausgeschaltetem Gerät und vorhandenem Außensensor). Deaktiviert = kein
-        Stoßlüften.
-      default: true
-      selector:
-        boolean: {}
-    stosslueften_temp:
-      name: Stoßlüften – Außentemperatur-Schwelle
-      description: Ab dieser Außentemperatur wird Stoßlüften ausgelöst (nur wenn „Stoßlüften
-        aktiv" eingeschaltet ist). Standard 24 °C.
-      default: 24
+          mode: slider
+    heizen_ein:
+      name: Heizen einschalten unter (°C)
+      default: 21.5
       selector:
         number:
           min: 10.0
-          max: 30.0
+          max: 24.0
           step: 0.5
           unit_of_measurement: °C
-          mode: box
-  source_url: https://github.com/burnagent/openrepo/blob/main/samsung_klima_blueprint.yaml
-trigger_variables:
-  klima_tv: !input klima_entity
-  ziel_helper_tv: !input ziel_temp_helper
-  ziel_fest_tv: !input ziel_temp
-  band_o_tv: !input band_oben
-  band_o_helper_tv: !input band_oben_helper
-  band_u_tv: !input band_unten
+          mode: slider
+    heizen_aus:
+      name: Heizen beenden bei (°C, Hysterese)
+      default: 23
+      selector:
+        number:
+          min: 16.0
+          max: 26.0
+          step: 0.5
+          unit_of_measurement: °C
+          mode: slider
+    kuehlen_stark_ueber:
+      name: 'Kühlen: starke Stufe ein über (°C)'
+      default: 28
+      selector:
+        number:
+          min: 22.0
+          max: 35.0
+          step: 0.5
+          unit_of_measurement: °C
+          mode: slider
+    kuehlen_stark_aus:
+      name: 'Kühlen: starke Stufe aus unter (°C, Hysterese)'
+      description: Untere Schwelle der starken Kühlstufe. Liegt der Mittelwert zwischen
+        dieser Schwelle und „starke Stufe ein über", bleibt die aktuell laufende Stufe
+        erhalten (Totband gegen Pendeln stark↔leise). Muss unter „starke Stufe ein
+        über" liegen.
+      default: 26
+      selector:
+        number:
+          min: 20.0
+          max: 34.0
+          step: 0.5
+          unit_of_measurement: °C
+          mode: slider
+    heizen_swing_unter:
+      name: 'Heizen: Swing-Lamellen unter (°C)'
+      default: 21
+      selector:
+        number:
+          min: 10.0
+          max: 24.0
+          step: 0.5
+          unit_of_measurement: °C
+          mode: slider
+    min_laufzeit:
+      name: Mindestlaufzeit vor Moduswechsel (Min)
+      default: 30
+      selector:
+        number:
+          min: 0.0
+          max: 120.0
+          step: 5.0
+          unit_of_measurement: min
+          mode: slider
+    fan_stark:
+      name: 'Lüftermodus: stark (Rohwert)'
+      default: medium
+      selector:
+        select:
+          options:
+          - auto
+          - diffuse
+          - low
+          - medium
+          - high
+          multiple: false
+          sort: false
+          custom_value: false
+    fan_leise:
+      name: 'Lüftermodus: leise (Rohwert)'
+      default: diffuse
+      selector:
+        select:
+          options:
+          - auto
+          - diffuse
+          - low
+          - medium
+          - high
+          multiple: false
+          sort: false
+          custom_value: false
+    pos_heizen:
+      name: 'Lamelle vertikal: Heizen normal (Rohwert)'
+      default: angle5
+      selector:
+        text:
+          multiple: false
+          multiline: false
+    pos_kuehlen:
+      name: 'Lamelle vertikal: Kühlen (Rohwert)'
+      default: angle1
+      selector:
+        text:
+          multiple: false
+          multiline: false
+    pos_swing:
+      name: 'Lamelle vertikal: Swing (Rohwert)'
+      default: swing
+      selector:
+        text:
+          multiple: false
+          multiline: false
+    pos_horizontal:
+      name: Lamelle horizontal (Rohwert)
+      default: left
+      selector:
+        select:
+          options:
+          - left
+          - center
+          - right
+          multiple: false
+          sort: false
+          custom_value: false
+    debug_notification:
+      name: Debug-Benachrichtigung
+      description: Aktiviert eine persistent_notification bei jedem Lauf – auch wenn
+        keine Aktion nötig ist. Nur zum Debuggen einschalten (erzeugt viele Meldungen).
+      default: false
+      selector:
+        boolean: {}
+  source_url: https://github.com/burnagent/openrepo/blob/main/klima_2sensor_blueprint.yaml
 variables:
-  klima: !input klima_entity
-  aussen_id: !input aussen_entity
-  fenster_aktiv: !input zeitfenster_aktiv
-  start_str: !input start_zeit
-  stop_str: !input stop_zeit
-  preset_soll: !input preset_kuehlen
+  clima: !input klima_entity
+  s1: !input sensor_1
+  s2: !input sensor_2
+  sel_vertikal: !input sel_vertikal
+  sel_horizontal: !input sel_horizontal
+  avg_entity: !input sensor_mittelwert
+  ziel_temp: !input ziel_temp
+  ziel_temp_kuehlen: !input ziel_temp_kuehlen
   ziel_helper: !input ziel_temp_helper
-  ziel_temp_fest: !input ziel_temp
-  ziel_temp: '{{ states(ziel_helper) | float(ziel_temp_fest) if ziel_helper not in
-    [none, ''''] else ziel_temp_fest }}'
   band_o_helper: !input band_oben_helper
-  band_o_fest: !input band_oben
-  band_o: '{{ states(band_o_helper) | float(band_o_fest) if band_o_helper not in
-    [none, ''''] else band_o_fest }}'
-  band_u: !input band_unten
-  stosslueften: !input stosslueften_aktiv
-  stoss_temp: !input stosslueften_temp
-  grenze_unten: '{{ ziel_temp - band_u }}'
-  grenze_oben: '{{ ziel_temp + band_o }}'
-  stable_unten: '{{ ziel_temp - (band_u / 2) }}'
-  stable_oben: '{{ ziel_temp + band_o }}'
-  ziel_str: '{{ (''%g'' % ziel_temp).replace(''.'', '','') }}'
-  unten_str: '{{ (''%g'' % grenze_unten).replace(''.'', '','') }}'
-  oben_str: '{{ (''%g'' % grenze_oben).replace(''.'', '','') }}'
-  stable_unten_str: '{{ (''%g'' % stable_unten).replace(''.'', '','') }}'
-  stable_oben_str: '{{ (''%g'' % stable_oben).replace(''.'', '','') }}'
-  trig: '{{ trigger.id | default(''manual'') }}'
-  temp: '{{ state_attr(klima,''current_temperature'') | float(none) }}'
-  mode: '{{ states(klima) }}'
-  fan: '{{ state_attr(klima,''fan_mode'') }}'
-  preset: '{{ state_attr(klima,''preset_mode'') }}'
-  preset_ist: '{{ ''none'' if (preset is none or preset | string in [''none'',''None'',''''])
-    else preset }}'
-  aussen: '{{ states(aussen_id) | float(none) if aussen_id not in [none, ''''] else
-    none }}'
-  jetzt_hms: '{{ now().strftime(''%H:%M:%S'') }}'
-  in_window: "{{ (not fenster_aktiv) or\n   ((start_str <= jetzt_hms < stop_str) if
-    start_str <= stop_str\n    else (jetzt_hms >= start_str or jetzt_hms < stop_str))
-    }}"
-  temp_str: '{{ (temp | round(1) | string).replace(''.'', '','') if temp is not none
-    else ''—'' }}'
-  aussen_str: '{{ (aussen | round(1) | string).replace(''.'', '','') if aussen is
-    not none else ''—'' }}'
-  ziel: "{{ ('off_zeit' if (trig == 't_offtime' and fenster_aktiv)\n    else ('aus_zeitfenster'
-    if not in_window\n    else ('durchlueften' if (trig == 't_purge' and stosslueften
-    and aussen is not none and aussen > stoss_temp and mode == 'off')\n    else ('purge_aus'
-    if trig == 't_purge'\n    else ('kein_wert' if temp is none\n    else ('off_stabil'
-    if (trig == 't_stable' and mode != 'off')\n    else ('heizen' if (temp < grenze_unten
-    and mode != 'heat')\n    else ('kuehlen' if (temp > grenze_oben and mode != 'cool')\n
-    \   else ('kuehl_preset' if (mode == 'cool' and ((preset_ist != preset_soll) or
-    (fan != 'auto')))\n    else 'halten'))))))))) }}"
-  did_act: '{{ ziel in [''off_zeit'',''off_stabil'',''heizen'',''kuehlen'',''kuehl_preset'',''durchlueften'']
+  wunsch: "{{ states(ziel_helper) | float(none)\n   if ziel_helper not in [none,
+    '', 'none'] else none }}"
+  band_o: "{{ states(band_o_helper) | float(none)\n   if band_o_helper not in [none,
+    '', 'none'] else none }}"
+  helper_aktiv: '{{ wunsch is not none and band_o is not none }}'
+  kuehlen_ein_fest: !input kuehlen_ein
+  kuehlen_aus_fest: !input kuehlen_aus
+  kuehlen_stark_ueber_fest: !input kuehlen_stark_ueber
+  kuehlen_stark_aus_fest: !input kuehlen_stark_aus
+  kuehlen_ein: '{{ (wunsch + band_o) if helper_aktiv else kuehlen_ein_fest }}'
+  kuehlen_aus: '{{ wunsch if helper_aktiv else kuehlen_aus_fest }}'
+  kuehlen_stark_ueber: '{{ (wunsch + band_o + 1) if helper_aktiv else kuehlen_stark_ueber_fest }}'
+  kuehlen_stark_aus: '{{ (wunsch + band_o) if helper_aktiv else kuehlen_stark_aus_fest }}'
+  heizen_ein: !input heizen_ein
+  heizen_aus: !input heizen_aus
+  heizen_swing_unter: !input heizen_swing_unter
+  min_laufzeit: !input min_laufzeit
+  fan_stark: !input fan_stark
+  fan_leise: !input fan_leise
+  pos_heizen: !input pos_heizen
+  pos_kuehlen: !input pos_kuehlen
+  pos_swing: !input pos_swing
+  pos_horizontal: !input pos_horizontal
+  ht1: '{{ states(s1) | float(none) }}'
+  ht2: '{{ states(s2) | float(none) }}'
+  avg_sensor: "{{ states(avg_entity) | float(none)\n   if (avg_entity not in [none,
+    '', 'none']) else none }}"
+  raum: "{{ avg_sensor if avg_sensor is not none\n   else ((([ht1, ht2] | reject('none')
+    | list | sum)\n          / ([ht1, ht2] | reject('none') | list | length))\n         if
+    ([ht1, ht2] | reject('none') | list | length) > 0 else none) }}"
+  valid: '{{ raum is not none }}'
+  hvac: '{{ states(clima) }}'
+  is_heating: '{{ hvac == ''heat'' }}'
+  is_cooling: '{{ hvac == ''cool'' }}'
+  last_chg: '{{ states[clima].last_changed if states[clima] is not none else now()
     }}'
-  notify: '{{ did_act and ziel != ''durchlueften'' }}'
-  status: Modus {{ {'off':'Aus','cool':'Kühlen','heat':'Heizen'}.get(mode, mode) }}{%
-    if mode == 'cool' %} (Lüfter {{ fan }}, Preset {{ preset }}){% elif mode == 'heat'
-    %} (Lüfter {{ fan }}){% endif %} · aktuell {{ temp_str }} °C
-  grund: "{{ {\n  'off_zeit': 'Zeitfenster-Ende ' ~ stop_str[:5] ~ ' Uhr → Anlage
-    aus',\n  'off_stabil': stable_unten_str ~ '–' ~ stable_oben_str ~ ' °C seit 15
-    Min stabil → Anlage aus',\n  'heizen': 'Raum < ' ~ unten_str ~ ' °C → Heizen,
-    Lüfter low, Ziel ' ~ ziel_str ~ ' °C',\n  'kuehlen': 'Raum > ' ~ oben_str ~ '
-    °C → Kühlen Preset ' ~ preset_soll ~ ' (Lüfter Auto), Ziel ' ~ ziel_str ~ ' °C',\n
-    \ 'kuehl_preset': 'Kühlen aktiv → Preset ' ~ preset_soll ~ ' + Lüfter Auto wiederhergestellt',\n
-    \ 'durchlueften': 'Gerät aus & außen ' ~ aussen_str ~ ' °C (> ' ~ ('%g' % stoss_temp).replace('.',
-    ',') ~ ') → 40 s Stoßlüften (fan_only + Boost), dann aus',\n  'purge_aus': 'Stoßlüft-Intervall
-    übersprungen (deaktiviert, außen ' ~ aussen_str ~ ' °C ≤ ' ~ ('%g' % stoss_temp).replace('.',
-    ',') ~ ', kein Sensor, oder Gerät kühlt/heizt → Kühlen/Heizen hat Vorrang)',\n
-    \ 'halten': 'im Zielbereich (' ~ unten_str ~ '–' ~ oben_str ~ ' °C) bzw. kein
-    Moduswechsel nötig → keine Änderung',\n  'aus_zeitfenster': 'außerhalb Zeitfenster
-    (' ~ start_str[:5] ~ '–' ~ stop_str[:5] ~ ' Uhr) → keine Steuerung',\n  'kein_wert':
-    'keine aktuelle Temperatur verfügbar → keine Steuerung'\n}.get(ziel, ziel) }}"
+  run_min: '{{ (now() - as_datetime(last_chg)).total_seconds() / 60 }}'
+  min_runtime_ok: '{{ run_min >= min_laufzeit }}'
+  locked: '{{ (is_heating or is_cooling) and not min_runtime_ok }}'
+  cool_needed: '{{ valid and raum >= kuehlen_ein }}'
+  cool_done: '{{ valid and raum <= kuehlen_aus }}'
+  heat_needed: '{{ valid and raum < heizen_ein }}'
+  heat_done: '{{ valid and raum >= heizen_aus }}'
+  want_cool: '{{ cool_needed or (is_cooling and not cool_done) }}'
+  want_heat: '{{ heat_needed or (is_heating and not heat_done) }}'
+  ist: "{{\n  'aus' if hvac == 'off' else\n  (('heizen_swing' if states(sel_vertikal)
+    == pos_swing else 'heizen_normal')\n    if hvac == 'heat' else\n  (('kuehlen_low'
+    if state_attr(clima, 'fan_mode') == fan_stark else 'kuehlen_diffuse')\n    if
+    hvac == 'cool' else hvac))\n}}"
+  cool_stark: "{{ valid and (raum > kuehlen_stark_ueber\n   or (ist == 'kuehlen_low'
+    and raum > kuehlen_stark_aus)) }}"
+  ziel: "{{\n  'skip' if not valid else\n  (('kuehlen_low' if cool_stark else 'kuehlen_diffuse')\n
+    \   if (want_cool and not (locked and is_heating)) else\n  (('heizen_swing' if
+    raum < heizen_swing_unter else 'heizen_normal')\n    if (want_heat and not (locked
+    and is_cooling)) else\n  ('aus' if (((is_heating or is_cooling) and min_runtime_ok)
+    or hvac == 'off')\n    else 'halten')))\n}}"
+  act: '{{ ziel not in [''skip'', ''halten''] and ziel != ist }}'
+  d_mode: "{{ 'cool' if ziel in ['kuehlen_low','kuehlen_diffuse']\n   else ('heat'
+    if ziel in ['heizen_normal','heizen_swing'] else 'off') }}"
+  d_temp: '{{ ziel_temp_kuehlen if d_mode == ''cool'' else ziel_temp }}'
+  d_fan: '{{ fan_stark if ziel == ''kuehlen_low'' else fan_leise }}'
+  d_vert: "{{ pos_swing if ziel == 'heizen_swing'\n   else (pos_heizen if ziel ==
+    'heizen_normal' else pos_kuehlen) }}"
+  name1: '{{ state_attr(s1,''friendly_name'') or ''Sensor 1'' }}'
+  name2: '{{ state_attr(s2,''friendly_name'') or ''Sensor 2'' }}'
+  txt_ist: "{{ {'aus':'Aus','heizen_normal':'Heizen - normal','heizen_swing':'Heizen
+    - Swing',\n    'kuehlen_low':'Kühlen - stark','kuehlen_diffuse':'Kühlen - leise'}.get(ist,
+    ist) }}"
+  txt_ziel: "{{ {'aus':'Aus','heizen_normal':'Heizen - normal','heizen_swing':'Heizen
+    - Swing',\n    'kuehlen_low':'Kühlen - stark','kuehlen_diffuse':'Kühlen - leise'}.get(ziel,
+    ziel) }}"
+  debug: !input debug_notification
 triggers:
-- trigger: template
-  value_template: '{% set zt = states(ziel_helper_tv) | float(ziel_fest_tv) if ziel_helper_tv
-    not in [none, ''''] else ziel_fest_tv %} {% set t = state_attr(klima_tv,''current_temperature'')
-    | float(none) %} {% set bo = states(band_o_helper_tv) | float(band_o_tv) if
-    band_o_helper_tv not in [none, ''''] else band_o_tv %} {{ t is not none and t
-    > (zt + bo) }}'
-  for:
-    minutes: 5
-  id: t_warm
-- trigger: template
-  value_template: '{% set zt = states(ziel_helper_tv) | float(ziel_fest_tv) if ziel_helper_tv
-    not in [none, ''''] else ziel_fest_tv %} {% set t = state_attr(klima_tv,''current_temperature'')
-    | float(none) %} {{ t is not none and t < (zt - band_u_tv) }}'
-  for:
-    minutes: 5
-  id: t_cold
-- trigger: template
-  value_template: '{% set zt = states(ziel_helper_tv) | float(ziel_fest_tv) if ziel_helper_tv
-    not in [none, ''''] else ziel_fest_tv %} {% set t = state_attr(klima_tv,''current_temperature'')
-    | float(none) %} {% set bo = states(band_o_helper_tv) | float(band_o_tv) if
-    band_o_helper_tv not in [none, ''''] else band_o_tv %} {{ t is not none and t
-    > (zt - (band_u_tv / 2)) and t < (zt + bo) }}'
-  for:
-    minutes: 15
-  id: t_stable
+- trigger: state
+  entity_id: !input sensor_1
+  id: sensor1_change
+- trigger: state
+  entity_id: !input sensor_2
+  id: sensor2_change
+- trigger: homeassistant
+  event: start
+  id: ha_start
 - trigger: time_pattern
   minutes: /5
-  id: t_check
-- trigger: time_pattern
-  minutes: '2'
-  id: t_purge
-- trigger: time_pattern
-  minutes: '17'
-  id: t_purge
-- trigger: time_pattern
-  minutes: '32'
-  id: t_purge
-- trigger: time_pattern
-  minutes: '47'
-  id: t_purge
-- trigger: time
-  at: !input stop_zeit
-  id: t_offtime
+  id: periodisch
 conditions: []
 actions:
 - choose:
   - conditions:
     - condition: template
-      value_template: '{{ ziel == ''durchlueften'' }}'
-    sequence:
+      value_template: '{{ not act }}'
+    sequence: []
+  default:
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: '{{ ziel == ''aus'' }}'
+      sequence:
+      - action: climate.turn_off
+        target:
+          entity_id: '{{ clima }}'
+    default:
     - action: climate.set_hvac_mode
       target:
-        entity_id: !input klima_entity
+        entity_id: '{{ clima }}'
       data:
-        hvac_mode: fan_only
-    - action: climate.set_preset_mode
-      target:
-        entity_id: !input klima_entity
-      data:
-        preset_mode: boost
-    - delay:
-        seconds: 40
-    - action: climate.set_hvac_mode
-      target:
-        entity_id: !input klima_entity
-      data:
-        hvac_mode: 'off'
-  - conditions:
-    - condition: template
-      value_template: '{{ ziel in [''off_zeit'',''off_stabil''] }}'
-    sequence:
-    - action: climate.set_hvac_mode
-      target:
-        entity_id: !input klima_entity
-      data:
-        hvac_mode: 'off'
-  - conditions:
-    - condition: template
-      value_template: '{{ ziel == ''heizen'' }}'
-    sequence:
-    - action: climate.set_hvac_mode
-      target:
-        entity_id: !input klima_entity
-      data:
-        hvac_mode: heat
-    - action: climate.set_fan_mode
-      target:
-        entity_id: !input klima_entity
-      data:
-        fan_mode: low
+        hvac_mode: '{{ d_mode }}'
     - action: climate.set_temperature
       target:
-        entity_id: !input klima_entity
+        entity_id: '{{ clima }}'
       data:
-        temperature: '{{ ziel_temp }}'
-  - conditions:
-    - condition: template
-      value_template: '{{ ziel == ''kuehlen'' }}'
-    sequence:
-    - action: climate.set_hvac_mode
-      target:
-        entity_id: !input klima_entity
-      data:
-        hvac_mode: cool
-    - action: climate.set_temperature
-      target:
-        entity_id: !input klima_entity
-      data:
-        temperature: '{{ ziel_temp }}'
+        temperature: '{{ d_temp }}'
     - action: climate.set_fan_mode
+      continue_on_error: true
       target:
-        entity_id: !input klima_entity
+        entity_id: '{{ clima }}'
       data:
-        fan_mode: auto
-    - action: climate.set_preset_mode
+        fan_mode: '{{ d_fan }}'
+    - action: select.select_option
+      continue_on_error: true
       target:
-        entity_id: !input klima_entity
+        entity_id: '{{ sel_vertikal }}'
       data:
-        preset_mode: !input preset_kuehlen
-  - conditions:
-    - condition: template
-      value_template: '{{ ziel == ''kuehl_preset'' }}'
-    sequence:
-    - action: climate.set_fan_mode
+        option: '{{ d_vert }}'
+    - action: select.select_option
+      continue_on_error: true
       target:
-        entity_id: !input klima_entity
+        entity_id: '{{ sel_horizontal }}'
       data:
-        fan_mode: auto
-    - action: climate.set_preset_mode
-      target:
-        entity_id: !input klima_entity
-      data:
-        preset_mode: !input preset_kuehlen
-  default: []
+        option: '{{ pos_horizontal }}'
+  - action: persistent_notification.create
+    data:
+      notification_id: klima_{{ clima | replace('.','_') }}_{{ now().timestamp() |
+        int }}
+      title: Klima {{ state_attr(clima,'friendly_name') or clima }}
+      message: '{{ now().strftime(''%d.%m. %H:%M'') }} · Umstellung von "{{ txt_ist
+        }}" auf "{{ txt_ziel }}" — Mittelwert {{ (raum | round(1) | string).replace(''.'',
+        '','') }} °C ({{ name1 }} {{ (ht1 | round(1) | string).replace(''.'', '','')
+        if ht1 is not none else ''—'' }} · {{ name2 }} {{ (ht2 | round(1) | string).replace(''.'',
+        '','') if ht2 is not none else ''—'' }})'
 - if:
   - condition: template
-    value_template: '{{ notify }}'
+    value_template: '{{ debug and not act }}'
   then:
   - action: persistent_notification.create
     data:
-      notification_id: klima_{{ klima | replace('.','_') }}_{{ now().timestamp() |
-        int }}
-      title: Klima {{ state_attr(klima,'friendly_name') or klima }}
-      message: '{{ now().strftime(''%d.%m. %H:%M'') }} · {{ grund }} — vorher: {{
-        status }}'
+      notification_id: klima_debug_{{ clima | replace('.','_') }}
+      title: "\U0001F50D Debug {{ state_attr(clima,'friendly_name') or clima }}"
+      message: '{{ now().strftime(''%d.%m. %H:%M'') }} · kein Schaltbefehl — raum
+        {{ (raum | round(1) | string).replace(''.'','','') }} °C · ziel: {{ ziel }}
+        · locked: {{ locked }} · act: {{ act }}'
 mode: single
 max_exceeded: silent
