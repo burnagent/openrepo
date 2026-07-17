@@ -1,0 +1,98 @@
+blueprint:
+  name: Klima – Warnung bei Dauerlauf in einem Modus
+  description: 'Überwacht ein oder mehrere Klimageräte und schickt eine Push-Mitteilung,
+    wenn ein Gerät länger als die eingestellte Zeit (Standard 3 h) ununterbrochen
+    im selben Modus (Heizen oder Kühlen) läuft. Solange der Dauerlauf anhält, wird
+    die Warnung im eingestellten Abstand (Standard 60 Min) wiederholt. Ein Moduswechsel
+    (z. B. Heizen → Kühlen) setzt den Zähler zurück.
+
+
+    Manueller Testlauf ("Ausführen"-Button): Es wird das erste Gerät der Liste mit
+    seinem aktuellen Modus geprüft und die Nachricht mit "(TEST)" markiert. Läuft
+    es gerade nicht, passiert einfach nichts (kein Fehler).'
+  domain: automation
+  input:
+    klima_entities:
+      name: Klimageräte
+      description: Die zu überwachenden climate-Entitäten.
+      selector:
+        entity:
+          filter:
+          - domain:
+            - climate
+          multiple: true
+          reorder: false
+    notify_entity:
+      name: Benachrichtigungs-Ziel
+      description: Die notify-Entität, an die die Warnung geschickt wird (z. B. die
+        der Companion-App auf dem Handy).
+      selector:
+        entity:
+          filter:
+          - domain:
+            - notify
+          multiple: false
+          reorder: false
+    laufzeit:
+      name: Dauerlauf-Schwelle (Stunden)
+      description: Nach so vielen Stunden ununterbrochenem Lauf im selben Modus kommt
+        die erste Warnung.
+      default: 3
+      selector:
+        number:
+          min: 1.0
+          max: 12.0
+          step: 0.5
+          unit_of_measurement: h
+          mode: slider
+    wiederhol_minuten:
+      name: Wiederholung (Minuten)
+      description: In diesem Abstand wird die Warnung wiederholt, solange der Dauerlauf
+        anhält.
+      default: 60
+      selector:
+        number:
+          min: 15.0
+          max: 240.0
+          step: 15.0
+          unit_of_measurement: min
+          mode: slider
+  source_url: https://github.com/burnagent/openrepo/blob/main/klima_dauerlauf_blueprint.yaml
+variables:
+  geraete: !input klima_entities
+  laufzeit: !input laufzeit
+  wiederhol_minuten: !input wiederhol_minuten
+  geraet: '{{ trigger.entity_id | default(geraete[0]) }}'
+  modus: '{{ trigger.to_state.state | default(states(geraet)) }}'
+  testlauf: '{{ trigger.entity_id is not defined }}'
+triggers:
+- trigger: state
+  entity_id: !input klima_entities
+  to:
+  - heat
+  - cool
+  for:
+    hours: !input laufzeit
+conditions: []
+actions:
+- repeat:
+    while:
+    - condition: template
+      value_template: '{{ modus in [''heat'', ''cool''] and states(geraet) == modus }}'
+    sequence:
+    - action: notify.send_message
+      target:
+        entity_id: !input notify_entity
+      data:
+        message: >-
+          ⚠️{{ ' (TEST)' if testlauf else '' }} {{ state_attr(geraet,
+          'friendly_name') or geraet }} läuft seit über {{ ('%g' % ((laufzeit +
+          (repeat.index - 1) * wiederhol_minuten / 60) | round(1))).replace('.', ',') }} h
+          ununterbrochen im Modus "{{ {'heat': 'Heizen', 'cool':
+          'Kühlen'}.get(modus, modus) }}" (aktuell {{ state_attr(geraet,
+          'current_temperature') }} °C, Soll {{ state_attr(geraet,
+          'temperature') }} °C). Bitte prüfen!
+    - delay:
+        minutes: !input wiederhol_minuten
+mode: parallel
+max: 10
