@@ -7,7 +7,8 @@ blueprint:
     (Ziel − Band unten) wird geheizt, oberhalb (Ziel + Band oben) gekühlt. Das Zeitfenster
     lässt sich per Schalter auch ganz deaktivieren (dann rund um die Uhr aktiv). Kühlen:
     wählbarer Preset (Standard WindFree mit Lüfter Auto). Heizen: Lüfter low. Schaltet
-    ab, wenn die Temperatur 15 Min im oberen Totband stabil ist, sowie zur eingestellten
+    ab, wenn beim Kühlen die Temperatur 15 Min unter (Ziel + Band oben) liegt bzw.
+    beim Heizen 15 Min über (Ziel − Band unten), sowie zur eingestellten
     Stopp-Zeit. Prüft alle 5 Minuten (zusätzlich ereignisgesteuert) und schreibt bei
     JEDER Prüfung im aktiven Fenster eine Mitteilung mit aktuellem Stand UND Begründung,
     warum gerade etwas gemacht wird – oder bewusst nicht. Optionales Stoßlüften (per
@@ -201,13 +202,9 @@ variables:
   stoss_temp: !input stosslueften_temp
   grenze_unten: '{{ ziel_temp - band_u }}'
   grenze_oben: '{{ ziel_temp + band_o }}'
-  stable_unten: '{{ ziel_temp - (band_u / 2) }}'
-  stable_oben: '{{ ziel_temp + band_o }}'
   ziel_str: '{{ (''%g'' % ziel_temp).replace(''.'', '','') }}'
   unten_str: '{{ (''%g'' % grenze_unten).replace(''.'', '','') }}'
   oben_str: '{{ (''%g'' % grenze_oben).replace(''.'', '','') }}'
-  stable_unten_str: '{{ (''%g'' % stable_unten).replace(''.'', '','') }}'
-  stable_oben_str: '{{ (''%g'' % stable_oben).replace(''.'', '','') }}'
   trig: '{{ trigger.id | default(''manual'') }}'
   temp: '{{ state_attr(klima,''current_temperature'') | float(none) }}'
   mode: '{{ states(klima) }}'
@@ -229,7 +226,7 @@ variables:
     if not in_window\n    else ('durchlueften' if (trig == 't_purge' and stosslueften
     and aussen is not none and aussen > stoss_temp and mode == 'off')\n    else ('purge_aus'
     if trig == 't_purge'\n    else ('kein_wert' if temp is none\n    else ('off_stabil'
-    if (trig == 't_stable' and mode != 'off')\n    else ('heizen' if (temp < grenze_unten
+    if (trig in ['t_stable_cool','t_stable_heat'] and mode != 'off')\n    else ('heizen' if (temp < grenze_unten
     and mode != 'heat')\n    else ('kuehlen' if (temp > grenze_oben and mode != 'cool')\n
     \   else ('kuehl_preset' if (mode == 'cool' and ((preset_ist != preset_soll) or
     (fan != 'auto')))\n    else 'halten'))))))))) }}"
@@ -240,8 +237,9 @@ variables:
     if mode == 'cool' %} (Lüfter {{ fan }}, Preset {{ preset }}){% elif mode == 'heat'
     %} (Lüfter {{ fan }}){% endif %} · aktuell {{ temp_str }} °C
   grund: "{{ {\n  'off_zeit': 'Zeitfenster-Ende ' ~ stop_str[:5] ~ ' Uhr → Anlage
-    aus',\n  'off_stabil': stable_unten_str ~ '–' ~ stable_oben_str ~ ' °C seit 15
-    Min stabil → Anlage aus',\n  'heizen': 'Raum < ' ~ unten_str ~ ' °C → Heizen,
+    aus',\n  'off_stabil': (('Kühlen: Raum seit 15 Min unter ' ~ oben_str ~ ' °C (Ziel
+    + Band) → Anlage aus') if mode == 'cool' else ('Heizen: Raum seit 15 Min über
+    ' ~ unten_str ~ ' °C (Ziel − Band) → Anlage aus')),\n  'heizen': 'Raum < ' ~ unten_str ~ ' °C → Heizen,
     Lüfter low, Ziel ' ~ ziel_str ~ ' °C',\n  'kuehlen': 'Raum > ' ~ oben_str ~ '
     °C → Kühlen Preset ' ~ preset_soll ~ ' (Lüfter Auto), Ziel ' ~ ziel_str ~ ' °C',\n
     \ 'kuehl_preset': 'Kühlen aktiv → Preset ' ~ preset_soll ~ ' + Lüfter Auto wiederhergestellt',\n
@@ -274,11 +272,19 @@ triggers:
   value_template: '{% set zt = states(ziel_helper_tv) | float(ziel_fest_tv) if ziel_helper_tv
     not in [none, ''''] else ziel_fest_tv %} {% set t = state_attr(klima_tv,''current_temperature'')
     | float(none) %} {% set bo = states(band_o_helper_tv) | float(band_o_tv) if
-    band_o_helper_tv not in [none, ''''] else band_o_tv %} {{ t is not none and t
-    > (zt - (band_u_tv / 2)) and t < (zt + bo) }}'
+    band_o_helper_tv not in [none, ''''] else band_o_tv %} {{ states(klima_tv) ==
+    ''cool'' and t is not none and t < (zt + bo) }}'
   for:
     minutes: 15
-  id: t_stable
+  id: t_stable_cool
+- trigger: template
+  value_template: '{% set zt = states(ziel_helper_tv) | float(ziel_fest_tv) if ziel_helper_tv
+    not in [none, ''''] else ziel_fest_tv %} {% set t = state_attr(klima_tv,''current_temperature'')
+    | float(none) %} {{ states(klima_tv) == ''heat'' and t is not none and t > (zt
+    - band_u_tv) }}'
+  for:
+    minutes: 15
+  id: t_stable_heat
 - trigger: time_pattern
   minutes: /5
   id: t_check
