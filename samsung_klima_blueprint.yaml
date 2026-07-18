@@ -1,98 +1,409 @@
 blueprint:
-  name: Klima – Warnung bei Dauerlauf in einem Modus
-  description: 'Überwacht ein oder mehrere Klimageräte und schickt eine Push-Mitteilung,
-    wenn ein Gerät länger als die eingestellte Zeit (Standard 3 h) ununterbrochen
-    im selben Modus (Heizen oder Kühlen) läuft. Solange der Dauerlauf anhält, wird
-    die Warnung im eingestellten Abstand (Standard 60 Min) wiederholt. Ein Moduswechsel
-    (z. B. Heizen → Kühlen) setzt den Zähler zurück.
-
-
-    Manueller Testlauf ("Ausführen"-Button): Es wird das erste Gerät der Liste mit
-    seinem aktuellen Modus geprüft und die Nachricht mit "(TEST)" markiert. Läuft
-    es gerade nicht, passiert einfach nichts (kein Fehler).'
+  name: Samsung WindFree – Raumtemperatur halten (Zieltemperatur, Totband & Stoßlüften
+    konfigurierbar)
+  description: 'Hält die Raumtemperatur im einstellbaren Zeitfenster (Standard 08:00–21:00)
+    auf der wählbaren Zieltemperatur (Standard 23 °C). Das Totband ist getrennt nach
+    oben und unten einstellbar (Default je 1 °C → Band 22–24 °C bei Ziel 23 °C): unterhalb
+    (Ziel − Band unten) wird geheizt, oberhalb (Ziel + Band oben) gekühlt. Das Zeitfenster
+    lässt sich per Schalter auch ganz deaktivieren (dann rund um die Uhr aktiv). Kühlen:
+    wählbarer Preset (Standard WindFree mit Lüfter Auto). Heizen: Lüfter low. Schaltet
+    ab, wenn beim Kühlen die Temperatur 15 Min unter (Ziel + Band oben) liegt bzw.
+    beim Heizen 15 Min über (Ziel − Band unten), sowie zur eingestellten
+    Stopp-Zeit. Prüft alle 5 Minuten (zusätzlich ereignisgesteuert) und schreibt bei
+    JEDER Prüfung im aktiven Fenster eine Mitteilung mit aktuellem Stand UND Begründung,
+    warum gerade etwas gemacht wird – oder bewusst nicht. Optionales Stoßlüften (per
+    Setting ein-/ausschaltbar): Liegt die Außentemperatur über der einstellbaren Schwelle
+    (Standard 24 °C), wird im aktiven Zeitfenster alle 15 Minuten 40 s lang fan_only
+    + Boost geschaltet und danach wieder ausgeschaltet. Das Stoßlüften erzeugt bewusst
+    KEINE Mitteilung (sonst Meldungsflut). Generischer Klon von Charlys Steuerung
+    – pro Raum nur die climate-Entität auswählen (Charly, Henry, Schlafzimmer, Büro
+    …).'
   domain: automation
   input:
-    klima_entities:
-      name: Klimageräte
-      description: Die zu überwachenden climate-Entitäten.
+    klima_entity:
+      name: Klimagerät
+      description: Die climate-Entität des Samsung-WindFree-Geräts.
       selector:
         entity:
           filter:
           - domain:
             - climate
-          multiple: true
+          multiple: false
           reorder: false
-    notify_entity:
-      name: Benachrichtigungs-Ziel
-      description: Die notify-Entität, an die die Warnung geschickt wird (z. B. die
-        der Companion-App auf dem Handy).
+    aussen_entity:
+      name: Außentemperatur-Sensor (optional)
+      description: Sensor der Außentemperatur. Wird für die Stoßlüftung benötigt (muss
+        zusätzlich über „Stoßlüften aktiv" eingeschaltet sein). Vorbelegt mit dem
+        Helper „Aussentemperatur Met.no". Feld leeren = kein Außensensor.
+      default: sensor.aussentemperatur_met_no
       selector:
         entity:
           filter:
           - domain:
-            - notify
+            - sensor
+            device_class:
+            - temperature
           multiple: false
           reorder: false
-    laufzeit:
-      name: Dauerlauf-Schwelle (Stunden)
-      description: Nach so vielen Stunden ununterbrochenem Lauf im selben Modus kommt
-        die erste Warnung.
-      default: 3
+    zeitfenster_aktiv:
+      name: Zeitfenster aktiv
+      description: Wenn aktiviert (Standard), steuert die Automation nur innerhalb
+        des unten eingestellten Zeitfensters und schaltet zur Stopp-Zeit ab. Deaktiviert
+        = rund um die Uhr aktiv, keine Zeitabschaltung.
+      default: true
+      selector:
+        boolean: {}
+    start_zeit:
+      name: Startzeit (Fensterbeginn)
+      description: Ab dieser Uhrzeit wird gesteuert – nur wirksam, wenn „Zeitfenster
+        aktiv" eingeschaltet ist.
+      default: 08:00:00
+      selector:
+        time: {}
+    stop_zeit:
+      name: Stoppzeit (Fensterende / Abschaltung)
+      description: Zu dieser Uhrzeit wird abgeschaltet, danach wird bis zur nächsten
+        Startzeit nicht mehr gesteuert – nur wirksam, wenn „Zeitfenster aktiv" eingeschaltet
+        ist.
+      default: '21:00:00'
+      selector:
+        time: {}
+    preset_kuehlen:
+      name: Kühl-Preset
+      description: Welcher Samsung-Preset beim Kühlen verwendet und gehalten wird.
+        In allen Fällen läuft der Lüfter auf „auto" – alle Presets nutzen auto, deshalb
+        wird auto beim Kühlen immer mitgesetzt und gehalten. „none" bedeutet keinen
+        Sondermodus und muss vom Gerät unterstützt werden.
+      default: wind_free
+      selector:
+        select:
+          options:
+          - wind_free
+          - quiet
+          - motion_indirect
+          - none
+          multiple: false
+          sort: false
+          custom_value: false
+    ziel_temp:
+      name: Zieltemperatur
+      description: 'Wunsch-Raumtemperatur, auf die geheizt/gekühlt wird. Das Totband
+        ergibt sich aus den Einstellungen „Band oben" und „Band unten": unterhalb
+        (Ziel − Band unten) → Heizen, oberhalb (Ziel + Band oben) → Kühlen. Beispiel:
+        Ziel 23 °C, Band je 1 °C → Bereich 22–24 °C.'
+      default: 23
       selector:
         number:
-          min: 1.0
-          max: 12.0
+          min: 16.0
+          max: 30.0
           step: 0.5
-          unit_of_measurement: h
-          mode: slider
-    wiederhol_minuten:
-      name: Wiederholung (Minuten)
-      description: In diesem Abstand wird die Warnung wiederholt, solange der Dauerlauf
-        anhält.
-      default: 60
+          unit_of_measurement: °C
+          mode: box
+    ziel_temp_helper:
+      name: Zieltemperatur-Helfer (optional)
+      description: 'Optionaler input_number-Helfer, der die Zieltemperatur vorgibt
+        und z. B. per Dashboard-Slider jederzeit verstellt werden kann. Wenn gesetzt,
+        hat er Vorrang vor der festen „Zieltemperatur" oben – diese dient dann nur
+        noch als Ersatzwert, falls der Helfer keinen gültigen Wert liefert. Feld leeren
+        = fester Wert wird verwendet.'
+      default: ''
+      selector:
+        entity:
+          filter:
+          - domain:
+            - input_number
+          multiple: false
+          reorder: false
+    band_oben_helper:
+      name: „Band oben"-Helfer (optional)
+      description: 'Optionaler input_number-Helfer für „Band oben" – also wie viel
+        Grad über der Zieltemperatur das Kühlen startet. Per Dashboard-Slider jederzeit
+        verstellbar (z. B. 1 oder 2 °C). Wenn gesetzt, hat er Vorrang vor dem festen
+        „Band oben" oben – dieses dient dann nur noch als Ersatzwert. Feld leeren
+        = fester Wert wird verwendet.'
+      default: ''
+      selector:
+        entity:
+          filter:
+          - domain:
+            - input_number
+          multiple: false
+          reorder: false
+    band_oben:
+      name: Band oben (Kühlen ab)
+      description: 'Grad über der Zieltemperatur, ab der gekühlt wird. Beispiel: Ziel
+        23 °C + Band oben 1 °C → Kühlen ab 24 °C.'
+      default: 1
       selector:
         number:
-          min: 15.0
-          max: 240.0
-          step: 15.0
-          unit_of_measurement: min
-          mode: slider
-  source_url: https://github.com/burnagent/openrepo/blob/main/klima_dauerlauf_blueprint.yaml
+          min: 0.5
+          max: 5.0
+          step: 0.5
+          unit_of_measurement: °C
+          mode: box
+    band_unten:
+      name: Band unten (Heizen ab)
+      description: 'Grad unter der Zieltemperatur, ab der geheizt wird. Beispiel:
+        Ziel 23 °C − Band unten 1 °C → Heizen unter 22 °C.'
+      default: 1
+      selector:
+        number:
+          min: 0.5
+          max: 5.0
+          step: 0.5
+          unit_of_measurement: °C
+          mode: box
+    stosslueften_aktiv:
+      name: Stoßlüften aktiv
+      description: Wenn aktiviert, wird bei Außentemperatur über der eingestellten
+        Schwelle alle 15 Minuten 40 Sekunden lang fan_only + Boost geschaltet (nur
+        bei ausgeschaltetem Gerät und vorhandenem Außensensor). Deaktiviert = kein
+        Stoßlüften.
+      default: true
+      selector:
+        boolean: {}
+    stosslueften_temp:
+      name: Stoßlüften – Außentemperatur-Schwelle
+      description: Ab dieser Außentemperatur wird Stoßlüften ausgelöst (nur wenn „Stoßlüften
+        aktiv" eingeschaltet ist). Standard 24 °C.
+      default: 24
+      selector:
+        number:
+          min: 10.0
+          max: 30.0
+          step: 0.5
+          unit_of_measurement: °C
+          mode: box
+  source_url: https://github.com/burnagent/openrepo/blob/main/samsung_klima_blueprint.yaml
+trigger_variables:
+  klima_tv: !input klima_entity
+  ziel_helper_tv: !input ziel_temp_helper
+  ziel_fest_tv: !input ziel_temp
+  band_o_tv: !input band_oben
+  band_o_helper_tv: !input band_oben_helper
+  band_u_tv: !input band_unten
 variables:
-  geraete: !input klima_entities
-  laufzeit: !input laufzeit
-  wiederhol_minuten: !input wiederhol_minuten
-  geraet: '{{ trigger.entity_id | default(geraete[0]) }}'
-  modus: '{{ trigger.to_state.state | default(states(geraet)) }}'
-  testlauf: '{{ trigger.entity_id is not defined }}'
+  klima: !input klima_entity
+  aussen_id: !input aussen_entity
+  fenster_aktiv: !input zeitfenster_aktiv
+  start_str: !input start_zeit
+  stop_str: !input stop_zeit
+  preset_soll: !input preset_kuehlen
+  ziel_helper: !input ziel_temp_helper
+  ziel_temp_fest: !input ziel_temp
+  ziel_temp: '{{ states(ziel_helper) | float(ziel_temp_fest) if ziel_helper not in
+    [none, ''''] else ziel_temp_fest }}'
+  band_o_helper: !input band_oben_helper
+  band_o_fest: !input band_oben
+  band_o: '{{ states(band_o_helper) | float(band_o_fest) if band_o_helper not in
+    [none, ''''] else band_o_fest }}'
+  band_u: !input band_unten
+  stosslueften: !input stosslueften_aktiv
+  stoss_temp: !input stosslueften_temp
+  grenze_unten: '{{ ziel_temp - band_u }}'
+  grenze_oben: '{{ ziel_temp + band_o }}'
+  ziel_str: '{{ (''%g'' % ziel_temp).replace(''.'', '','') }}'
+  unten_str: '{{ (''%g'' % grenze_unten).replace(''.'', '','') }}'
+  oben_str: '{{ (''%g'' % grenze_oben).replace(''.'', '','') }}'
+  trig: '{{ trigger.id | default(''manual'') }}'
+  temp: '{{ state_attr(klima,''current_temperature'') | float(none) }}'
+  mode: '{{ states(klima) }}'
+  fan: '{{ state_attr(klima,''fan_mode'') }}'
+  preset: '{{ state_attr(klima,''preset_mode'') }}'
+  preset_ist: '{{ ''none'' if (preset is none or preset | string in [''none'',''None'',''''])
+    else preset }}'
+  aussen: '{{ states(aussen_id) | float(none) if aussen_id not in [none, ''''] else
+    none }}'
+  jetzt_hms: '{{ now().strftime(''%H:%M:%S'') }}'
+  in_window: "{{ (not fenster_aktiv) or\n   ((start_str <= jetzt_hms < stop_str) if
+    start_str <= stop_str\n    else (jetzt_hms >= start_str or jetzt_hms < stop_str))
+    }}"
+  temp_str: '{{ (temp | round(1) | string).replace(''.'', '','') if temp is not none
+    else ''—'' }}'
+  aussen_str: '{{ (aussen | round(1) | string).replace(''.'', '','') if aussen is
+    not none else ''—'' }}'
+  ziel: "{{ ('off_zeit' if (trig == 't_offtime' and fenster_aktiv)\n    else ('aus_zeitfenster'
+    if not in_window\n    else ('durchlueften' if (trig == 't_purge' and stosslueften
+    and aussen is not none and aussen > stoss_temp and mode == 'off')\n    else ('purge_aus'
+    if trig == 't_purge'\n    else ('kein_wert' if temp is none\n    else ('off_stabil'
+    if (trig in ['t_stable_cool','t_stable_heat'] and mode != 'off')\n    else ('heizen' if (temp < grenze_unten
+    and mode != 'heat')\n    else ('kuehlen' if (temp > grenze_oben and mode != 'cool')\n
+    \   else ('kuehl_preset' if (mode == 'cool' and ((preset_ist != preset_soll) or
+    (fan != 'auto')))\n    else 'halten'))))))))) }}"
+  did_act: '{{ ziel in [''off_zeit'',''off_stabil'',''heizen'',''kuehlen'',''kuehl_preset'',''durchlueften'']
+    }}'
+  notify: '{{ did_act and ziel != ''durchlueften'' }}'
+  status: Modus {{ {'off':'Aus','cool':'Kühlen','heat':'Heizen'}.get(mode, mode) }}{%
+    if mode == 'cool' %} (Lüfter {{ fan }}, Preset {{ preset }}){% elif mode == 'heat'
+    %} (Lüfter {{ fan }}){% endif %} · aktuell {{ temp_str }} °C
+  grund: "{{ {\n  'off_zeit': 'Zeitfenster-Ende ' ~ stop_str[:5] ~ ' Uhr → Anlage
+    aus',\n  'off_stabil': (('Kühlen: Raum seit 15 Min unter ' ~ oben_str ~ ' °C (Ziel
+    + Band) → Anlage aus') if mode == 'cool' else ('Heizen: Raum seit 15 Min über
+    ' ~ unten_str ~ ' °C (Ziel − Band) → Anlage aus')),\n  'heizen': 'Raum < ' ~ unten_str ~ ' °C → Heizen,
+    Lüfter low, Ziel ' ~ ziel_str ~ ' °C',\n  'kuehlen': 'Raum > ' ~ oben_str ~ '
+    °C → Kühlen Preset ' ~ preset_soll ~ ' (Lüfter Auto), Ziel ' ~ ziel_str ~ ' °C',\n
+    \ 'kuehl_preset': 'Kühlen aktiv → Preset ' ~ preset_soll ~ ' + Lüfter Auto wiederhergestellt',\n
+    \ 'durchlueften': 'Gerät aus & außen ' ~ aussen_str ~ ' °C (> ' ~ ('%g' % stoss_temp).replace('.',
+    ',') ~ ') → 40 s Stoßlüften (fan_only + Boost), dann aus',\n  'purge_aus': 'Stoßlüft-Intervall
+    übersprungen (deaktiviert, außen ' ~ aussen_str ~ ' °C ≤ ' ~ ('%g' % stoss_temp).replace('.',
+    ',') ~ ', kein Sensor, oder Gerät kühlt/heizt → Kühlen/Heizen hat Vorrang)',\n
+    \ 'halten': 'im Zielbereich (' ~ unten_str ~ '–' ~ oben_str ~ ' °C) bzw. kein
+    Moduswechsel nötig → keine Änderung',\n  'aus_zeitfenster': 'außerhalb Zeitfenster
+    (' ~ start_str[:5] ~ '–' ~ stop_str[:5] ~ ' Uhr) → keine Steuerung',\n  'kein_wert':
+    'keine aktuelle Temperatur verfügbar → keine Steuerung'\n}.get(ziel, ziel) }}"
 triggers:
-- trigger: state
-  entity_id: !input klima_entities
-  to:
-  - heat
-  - cool
+- trigger: template
+  value_template: '{% set zt = states(ziel_helper_tv) | float(ziel_fest_tv) if ziel_helper_tv
+    not in [none, ''''] else ziel_fest_tv %} {% set t = state_attr(klima_tv,''current_temperature'')
+    | float(none) %} {% set bo = states(band_o_helper_tv) | float(band_o_tv) if
+    band_o_helper_tv not in [none, ''''] else band_o_tv %} {{ t is not none and t
+    > (zt + bo) }}'
   for:
-    hours: !input laufzeit
+    minutes: 5
+  id: t_warm
+- trigger: template
+  value_template: '{% set zt = states(ziel_helper_tv) | float(ziel_fest_tv) if ziel_helper_tv
+    not in [none, ''''] else ziel_fest_tv %} {% set t = state_attr(klima_tv,''current_temperature'')
+    | float(none) %} {{ t is not none and t < (zt - band_u_tv) }}'
+  for:
+    minutes: 5
+  id: t_cold
+- trigger: template
+  value_template: '{% set zt = states(ziel_helper_tv) | float(ziel_fest_tv) if ziel_helper_tv
+    not in [none, ''''] else ziel_fest_tv %} {% set t = state_attr(klima_tv,''current_temperature'')
+    | float(none) %} {% set bo = states(band_o_helper_tv) | float(band_o_tv) if
+    band_o_helper_tv not in [none, ''''] else band_o_tv %} {{ states(klima_tv) ==
+    ''cool'' and t is not none and t < (zt + bo) }}'
+  for:
+    minutes: 15
+  id: t_stable_cool
+- trigger: template
+  value_template: '{% set zt = states(ziel_helper_tv) | float(ziel_fest_tv) if ziel_helper_tv
+    not in [none, ''''] else ziel_fest_tv %} {% set t = state_attr(klima_tv,''current_temperature'')
+    | float(none) %} {{ states(klima_tv) == ''heat'' and t is not none and t > (zt
+    - band_u_tv) }}'
+  for:
+    minutes: 15
+  id: t_stable_heat
+- trigger: time_pattern
+  minutes: /5
+  id: t_check
+- trigger: time_pattern
+  minutes: '2'
+  id: t_purge
+- trigger: time_pattern
+  minutes: '17'
+  id: t_purge
+- trigger: time_pattern
+  minutes: '32'
+  id: t_purge
+- trigger: time_pattern
+  minutes: '47'
+  id: t_purge
+- trigger: time
+  at: !input stop_zeit
+  id: t_offtime
 conditions: []
 actions:
-- repeat:
-    while:
+- choose:
+  - conditions:
     - condition: template
-      value_template: '{{ modus in [''heat'', ''cool''] and states(geraet) == modus }}'
+      value_template: '{{ ziel == ''durchlueften'' }}'
     sequence:
-    - action: notify.send_message
+    - action: climate.set_hvac_mode
       target:
-        entity_id: !input notify_entity
+        entity_id: !input klima_entity
       data:
-        message: >-
-          ⚠️{{ ' (TEST)' if testlauf else '' }} {{ state_attr(geraet,
-          'friendly_name') or geraet }} läuft seit über {{ ('%g' % ((laufzeit +
-          (repeat.index - 1) * wiederhol_minuten / 60) | round(1))).replace('.', ',') }} h
-          ununterbrochen im Modus "{{ {'heat': 'Heizen', 'cool':
-          'Kühlen'}.get(modus, modus) }}" (aktuell {{ state_attr(geraet,
-          'current_temperature') }} °C, Soll {{ state_attr(geraet,
-          'temperature') }} °C). Bitte prüfen!
+        hvac_mode: fan_only
+    - action: climate.set_preset_mode
+      target:
+        entity_id: !input klima_entity
+      data:
+        preset_mode: boost
     - delay:
-        minutes: !input wiederhol_minuten
-mode: parallel
-max: 10
+        seconds: 40
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: !input klima_entity
+      data:
+        hvac_mode: 'off'
+  - conditions:
+    - condition: template
+      value_template: '{{ ziel in [''off_zeit'',''off_stabil''] }}'
+    sequence:
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: !input klima_entity
+      data:
+        hvac_mode: 'off'
+  - conditions:
+    - condition: template
+      value_template: '{{ ziel == ''heizen'' }}'
+    sequence:
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: !input klima_entity
+      data:
+        hvac_mode: heat
+    - action: climate.set_fan_mode
+      target:
+        entity_id: !input klima_entity
+      data:
+        fan_mode: low
+    - action: climate.set_temperature
+      target:
+        entity_id: !input klima_entity
+      data:
+        temperature: '{{ ziel_temp }}'
+  - conditions:
+    - condition: template
+      value_template: '{{ ziel == ''kuehlen'' }}'
+    sequence:
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: !input klima_entity
+      data:
+        hvac_mode: cool
+    - action: climate.set_temperature
+      target:
+        entity_id: !input klima_entity
+      data:
+        temperature: '{{ ziel_temp }}'
+    - action: climate.set_fan_mode
+      target:
+        entity_id: !input klima_entity
+      data:
+        fan_mode: auto
+    - action: climate.set_preset_mode
+      target:
+        entity_id: !input klima_entity
+      data:
+        preset_mode: !input preset_kuehlen
+  - conditions:
+    - condition: template
+      value_template: '{{ ziel == ''kuehl_preset'' }}'
+    sequence:
+    - action: climate.set_fan_mode
+      target:
+        entity_id: !input klima_entity
+      data:
+        fan_mode: auto
+    - action: climate.set_preset_mode
+      target:
+        entity_id: !input klima_entity
+      data:
+        preset_mode: !input preset_kuehlen
+  default: []
+- if:
+  - condition: template
+    value_template: '{{ notify }}'
+  then:
+  - action: persistent_notification.create
+    data:
+      notification_id: klima_{{ klima | replace('.','_') }}_{{ now().timestamp() |
+        int }}
+      title: Klima {{ state_attr(klima,'friendly_name') or klima }}
+      message: '{{ now().strftime(''%d.%m. %H:%M'') }} · {{ grund }} — vorher: {{
+        status }}'
+mode: single
+max_exceeded: silent
