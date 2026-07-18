@@ -207,6 +207,7 @@ variables:
   oben_str: '{{ (''%g'' % grenze_oben).replace(''.'', '','') }}'
   trig: '{{ trigger.id | default(''manual'') }}'
   temp: '{{ state_attr(klima,''current_temperature'') | float(none) }}'
+  soll: '{{ state_attr(klima,''temperature'') | float(none) }}'
   mode: '{{ states(klima) }}'
   fan: '{{ state_attr(klima,''fan_mode'') }}'
   preset: '{{ state_attr(klima,''preset_mode'') }}'
@@ -229,8 +230,10 @@ variables:
     if (trig in ['t_stable_cool','t_stable_heat'] and mode != 'off')\n    else ('heizen' if (temp < grenze_unten
     and mode != 'heat')\n    else ('kuehlen' if (temp > grenze_oben and mode != 'cool')\n
     \   else ('kuehl_preset' if (mode == 'cool' and ((preset_ist != preset_soll) or
-    (fan != 'auto')))\n    else 'halten'))))))))) }}"
-  did_act: '{{ ziel in [''off_zeit'',''off_stabil'',''heizen'',''kuehlen'',''kuehl_preset'',''durchlueften'']
+    (fan != 'auto') or soll is none or (soll | round(1)) != (ziel_temp | round(1))))\n
+    \   else ('heiz_soll' if (mode == 'heat' and (soll is none or (soll | round(1))
+    != (ziel_temp | round(1))))\n    else 'halten')))))))))) }}"
+  did_act: '{{ ziel in [''off_zeit'',''off_stabil'',''heizen'',''kuehlen'',''kuehl_preset'',''heiz_soll'',''durchlueften'']
     }}'
   notify: '{{ did_act and ziel != ''durchlueften'' }}'
   status: Modus {{ {'off':'Aus','cool':'Kühlen','heat':'Heizen'}.get(mode, mode) }}{%
@@ -242,7 +245,9 @@ variables:
     ' ~ unten_str ~ ' °C (Ziel − Band) → Anlage aus')),\n  'heizen': 'Raum < ' ~ unten_str ~ ' °C → Heizen,
     Lüfter low, Ziel ' ~ ziel_str ~ ' °C',\n  'kuehlen': 'Raum > ' ~ oben_str ~ '
     °C → Kühlen Preset ' ~ preset_soll ~ ' (Lüfter Auto), Ziel ' ~ ziel_str ~ ' °C',\n
-    \ 'kuehl_preset': 'Kühlen aktiv → Preset ' ~ preset_soll ~ ' + Lüfter Auto wiederhergestellt',\n
+    \ 'kuehl_preset': 'Kühlen aktiv → Preset ' ~ preset_soll ~ ', Lüfter Auto +
+    Soll ' ~ ziel_str ~ ' °C wiederhergestellt',\n  'heiz_soll': 'Heizen aktiv →
+    Soll auf ' ~ ziel_str ~ ' °C nachgezogen',\n
     \ 'durchlueften': 'Gerät aus & außen ' ~ aussen_str ~ ' °C (> ' ~ ('%g' % stoss_temp).replace('.',
     ',') ~ ') → 40 s Stoßlüften (fan_only + Boost), dann aus',\n  'purge_aus': 'Stoßlüft-Intervall
     übersprungen (deaktiviert, außen ' ~ aussen_str ~ ' °C ≤ ' ~ ('%g' % stoss_temp).replace('.',
@@ -383,6 +388,11 @@ actions:
     - condition: template
       value_template: '{{ ziel == ''kuehl_preset'' }}'
     sequence:
+    - action: climate.set_temperature
+      target:
+        entity_id: !input klima_entity
+      data:
+        temperature: '{{ ziel_temp }}'
     - action: climate.set_fan_mode
       target:
         entity_id: !input klima_entity
@@ -393,6 +403,15 @@ actions:
         entity_id: !input klima_entity
       data:
         preset_mode: !input preset_kuehlen
+  - conditions:
+    - condition: template
+      value_template: '{{ ziel == ''heiz_soll'' }}'
+    sequence:
+    - action: climate.set_temperature
+      target:
+        entity_id: !input klima_entity
+      data:
+        temperature: '{{ ziel_temp }}'
   default: []
 - if:
   - condition: template
@@ -407,3 +426,5 @@ actions:
         status }}'
 mode: single
 max_exceeded: silent
+# rev 2026-07-17: Stabil-Abschaltung neu (Kühlen: 15 Min < Ziel+Band → aus; Heizen: 15 Min > Ziel−Band → aus)
+# rev 2026-07-17: Soll wird im laufenden Betrieb mit Wunschtemperatur nachgezogen (kuehl_preset + heiz_soll)
