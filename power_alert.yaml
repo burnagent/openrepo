@@ -1,0 +1,98 @@
+blueprint:
+  name: "Leistungsalarm – Gerät über X Watt für Y Minuten"
+  description: >
+    Sendet eine Benachrichtigung, wenn ein Leistungssensor länger als die
+    gewählte Zeit über einem definierten Schwellenwert bleibt.
+    Alle Parameter sind optional vorkonfiguriert und können beim Einrichten
+    der Automation angepasst werden.
+  domain: automation
+  author: Björn Franz
+  source_url: https://github.com/<dein-repo>/power_alert.yaml
+
+  input:
+    power_sensor:
+      name: Leistungssensor
+      description: >
+        Der Sensor der die aktuelle Leistung in Watt misst
+        (z.B. sensor.wc_unten_spiegel_infrarot_leistung).
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+
+    above_watts:
+      name: Schwellenwert (Watt)
+      description: Alarm auslösen wenn der Verbrauch diesen Wert überschreitet.
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 10000
+          step: 1
+          unit_of_measurement: W
+          mode: box
+
+    duration_minutes:
+      name: Dauer (Minuten)
+      description: Wie lange muss der Schwellenwert überschritten sein, bevor der Alarm ausgelöst wird?
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 1440
+          step: 1
+          unit_of_measurement: min
+          mode: box
+
+    notify_target:
+      name: Benachrichtigungs-Dienst
+      description: >
+        Welcher notify-Dienst soll verwendet werden?
+        z.B. "notify" für alle, oder "mobile_app_bjorns_iphone" für ein einzelnes Gerät.
+      default: "notify"
+      selector:
+        text:
+
+    device_name:
+      name: Gerätename (für die Nachricht)
+      description: >
+        Optionaler Anzeigename des Geräts, der in der Benachrichtigung verwendet wird.
+        Wenn leer, wird die Entity-ID verwendet.
+      default: ""
+      selector:
+        text:
+
+variables:
+  sensor_entity: !input power_sensor
+  threshold: !input above_watts
+  duration: !input duration_minutes
+  name_override: !input device_name
+  display_name: >-
+    {% if name_override | trim != "" %}
+      {{ name_override }}
+    {% else %}
+      {{ sensor_entity }}
+    {% endif %}
+
+trigger:
+  - trigger: numeric_state
+    entity_id: !input power_sensor
+    above: !input above_watts
+    for:
+      minutes: !input duration_minutes
+
+condition: []
+
+action:
+  - action: "notify.{{ notify_target }}"
+    data:
+      title: "⚠️ Leistungsalarm – {{ display_name }}"
+      message: >-
+        {{ display_name }} verbraucht seit mehr als {{ duration }} Minuten
+        über {{ threshold }} W.
+
+        Aktueller Verbrauch: {{ states(sensor_entity) | round(1) }} W.
+
+        Bitte prüfen ob das Gerät noch benötigt wird.
+
+mode: single
