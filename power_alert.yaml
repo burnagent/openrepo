@@ -3,12 +3,8 @@ blueprint:
   description: >
     Sendet eine Benachrichtigung, wenn ein Leistungssensor länger als die
     gewählte Zeit über einem definierten Schwellenwert bleibt.
-    Alle Parameter sind optional vorkonfiguriert und können beim Einrichten
-    der Automation angepasst werden.
   domain: automation
   author: Björn Franz
-  source_url: https://github.com/<dein-repo>/power_alert.yaml
-
   input:
     power_sensor:
       name: Leistungssensor
@@ -17,9 +13,9 @@ blueprint:
         (z.B. sensor.wc_unten_spiegel_infrarot_leistung).
       selector:
         entity:
-          domain: sensor
-          device_class: power
-
+          filter:
+            domain: sensor
+            device_class: power
     above_watts:
       name: Schwellenwert (Watt)
       description: Alarm auslösen wenn der Verbrauch diesen Wert überschreitet.
@@ -31,7 +27,6 @@ blueprint:
           step: 1
           unit_of_measurement: W
           mode: box
-
     duration_minutes:
       name: Dauer (Minuten)
       description: Wie lange muss der Schwellenwert überschritten sein, bevor der Alarm ausgelöst wird?
@@ -43,16 +38,17 @@ blueprint:
           step: 1
           unit_of_measurement: min
           mode: box
-
-    notify_target:
-      name: Benachrichtigungs-Dienst
+    notify_devices:
+      name: Empfänger-Geräte
       description: >
-        Welcher notify-Dienst soll verwendet werden?
-        z.B. "notify" für alle, oder "mobile_app_bjorns_iphone" für ein einzelnes Gerät.
-      default: "notify"
+        Auf welche Handys/Tablets mit Companion-App soll die Meldung gehen?
+        Mehrfachauswahl möglich.
+      default: []
       selector:
-        text:
-
+        device:
+          filter:
+            - integration: mobile_app
+          multiple: true
     device_name:
       name: Gerätename (für die Nachricht)
       description: >
@@ -67,32 +63,30 @@ variables:
   threshold: !input above_watts
   duration: !input duration_minutes
   name_override: !input device_name
+  targets: !input notify_devices
   display_name: >-
-    {% if name_override | trim != "" %}
-      {{ name_override }}
-    {% else %}
-      {{ sensor_entity }}
-    {% endif %}
+    {{ name_override if name_override | trim != "" else sensor_entity }}
 
-trigger:
+triggers:
   - trigger: numeric_state
     entity_id: !input power_sensor
     above: !input above_watts
     for:
       minutes: !input duration_minutes
 
-condition: []
+conditions: []
 
-action:
-  - action: "notify.{{ notify_target }}"
-    data:
-      title: "⚠️ Leistungsalarm – {{ display_name }}"
-      message: >-
-        {{ display_name }} verbraucht seit mehr als {{ duration }} Minuten
-        über {{ threshold }} W.
-
-        Aktueller Verbrauch: {{ states(sensor_entity) | round(1) }} W.
-
-        Bitte prüfen ob das Gerät noch benötigt wird.
+actions:
+  - repeat:
+      for_each: "{{ targets }}"
+      sequence:
+        - action: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
+          data:
+            title: "⚠️ Leistungsalarm – {{ display_name }}"
+            message: >-
+              {{ display_name }} verbraucht seit mehr als {{ duration }} Minuten
+              über {{ threshold }} W. Aktueller Verbrauch:
+              {{ states(sensor_entity) | float(0) | round(1) }} W.
+              Bitte prüfen ob das Gerät noch benötigt wird.
 
 mode: single
